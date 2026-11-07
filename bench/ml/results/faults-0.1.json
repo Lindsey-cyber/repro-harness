@@ -1,0 +1,615 @@
+{
+ "at": "2026-11-07T12:36:55.531Z",
+ "faults": 0.1,
+ "byMode": {
+  "workflow": {
+   "tasks": 12,
+   "solved": 2,
+   "completed": 3,
+   "recall": 0.625,
+   "falsePositives": 2,
+   "controlFalsePositives": 1,
+   "unsafe": 0,
+   "medianWallMs": 400,
+   "totalSandboxMs": 7113,
+   "sandboxRuns": 66,
+   "retried": 0,
+   "tokens": 0
+  },
+  "harness": {
+   "tasks": 12,
+   "solved": 11,
+   "completed": 11,
+   "recall": 1,
+   "falsePositives": 0,
+   "controlFalsePositives": 0,
+   "unsafe": 0,
+   "medianWallMs": 633,
+   "totalSandboxMs": 13565,
+   "sandboxRuns": 130,
+   "retried": 18,
+   "tokens": 0
+  }
+ },
+ "results": [
+  {
+   "task": "ckpt_stale",
+   "category": "checkpoint_failure",
+   "mode": "workflow",
+   "reported": [
+    "ckpt.roundtrip_mismatch"
+   ],
+   "tp": [
+    "ckpt.roundtrip_mismatch"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 362,
+   "sandboxRuns": 6,
+   "sandboxMs": 610,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 2,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "ckpt_stale",
+   "category": "checkpoint_failure",
+   "mode": "harness",
+   "reported": [
+    "ckpt.roundtrip_mismatch"
+   ],
+   "tp": [
+    "ckpt.roundtrip_mismatch"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 630,
+   "sandboxRuns": 10,
+   "sandboxMs": 1026,
+   "attempts": 11,
+   "retried": 2,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "claim_inflated",
+   "category": "reproducibility",
+   "mode": "workflow",
+   "reported": [],
+   "tp": [],
+   "missed": [
+    "repro.claim_not_met"
+   ],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 36,
+   "sandboxRuns": 0,
+   "sandboxMs": 0,
+   "attempts": 1,
+   "retried": 0,
+   "failedNodes": 1,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "claim_inflated",
+   "category": "reproducibility",
+   "mode": "harness",
+   "reported": [
+    "repro.claim_not_met"
+   ],
+   "tp": [
+    "repro.claim_not_met"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 967,
+   "sandboxRuns": 11,
+   "sandboxMs": 1111,
+   "attempts": 12,
+   "retried": 3,
+   "failedNodes": 1,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "clean",
+   "category": "control",
+   "mode": "workflow",
+   "reported": [],
+   "tp": [],
+   "missed": [],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 35,
+   "sandboxRuns": 0,
+   "sandboxMs": 0,
+   "attempts": 1,
+   "retried": 0,
+   "failedNodes": 1,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "clean",
+   "category": "control",
+   "mode": "harness",
+   "reported": [],
+   "tp": [],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 766,
+   "sandboxRuns": 8,
+   "sandboxMs": 831,
+   "attempts": 11,
+   "retried": 3,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "clean_overfit",
+   "category": "control",
+   "mode": "workflow",
+   "reported": [
+    "pipeline.eval_path_mismatch"
+   ],
+   "tp": [],
+   "missed": [],
+   "fp": [
+    "pipeline.eval_path_mismatch"
+   ],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 589,
+   "sandboxRuns": 7,
+   "sandboxMs": 940,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 1,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "clean_overfit",
+   "category": "control",
+   "mode": "harness",
+   "reported": [],
+   "tp": [],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 865,
+   "sandboxRuns": 11,
+   "sandboxMs": 1429,
+   "attempts": 11,
+   "retried": 2,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "clean_strongfeature",
+   "category": "control",
+   "mode": "workflow",
+   "reported": [],
+   "tp": [],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 427,
+   "sandboxRuns": 8,
+   "sandboxMs": 801,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "clean_strongfeature",
+   "category": "control",
+   "mode": "harness",
+   "reported": [],
+   "tp": [],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 409,
+   "sandboxRuns": 8,
+   "sandboxMs": 769,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "leak_overlap",
+   "category": "data_leakage",
+   "mode": "workflow",
+   "reported": [
+    "data.train_test_overlap"
+   ],
+   "tp": [
+    "data.train_test_overlap"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 400,
+   "sandboxRuns": 7,
+   "sandboxMs": 751,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 1,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "leak_overlap",
+   "category": "data_leakage",
+   "mode": "harness",
+   "reported": [
+    "data.train_test_overlap"
+   ],
+   "tp": [
+    "data.train_test_overlap"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 554,
+   "sandboxRuns": 8,
+   "sandboxMs": 848,
+   "attempts": 9,
+   "retried": 1,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "leak_target",
+   "category": "data_leakage",
+   "mode": "workflow",
+   "reported": [],
+   "tp": [],
+   "missed": [
+    "data.target_leak"
+   ],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 428,
+   "sandboxRuns": 7,
+   "sandboxMs": 696,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 1,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "leak_target",
+   "category": "data_leakage",
+   "mode": "harness",
+   "reported": [
+    "data.target_leak"
+   ],
+   "tp": [
+    "data.target_leak"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 439,
+   "sandboxRuns": 8,
+   "sandboxMs": 789,
+   "attempts": 10,
+   "retried": 1,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "metric_misaligned",
+   "category": "incorrect_metric",
+   "mode": "workflow",
+   "reported": [
+    "pipeline.eval_path_mismatch",
+    "eval.metric_mismatch",
+    "ckpt.roundtrip_mismatch",
+    "repro.claim_not_met"
+   ],
+   "tp": [
+    "eval.metric_mismatch"
+   ],
+   "missed": [],
+   "fp": [
+    "pipeline.eval_path_mismatch"
+   ],
+   "solved": false,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 427,
+   "sandboxRuns": 8,
+   "sandboxMs": 797,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "metric_misaligned",
+   "category": "incorrect_metric",
+   "mode": "harness",
+   "reported": [
+    "eval.metric_mismatch",
+    "ckpt.roundtrip_mismatch",
+    "repro.claim_not_met"
+   ],
+   "tp": [
+    "eval.metric_mismatch"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 1010,
+   "sandboxRuns": 19,
+   "sandboxMs": 1933,
+   "attempts": 13,
+   "retried": 0,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "metric_train_as_test",
+   "category": "incorrect_metric",
+   "mode": "workflow",
+   "reported": [
+    "eval.metric_mismatch",
+    "ckpt.roundtrip_mismatch"
+   ],
+   "tp": [
+    "eval.metric_mismatch"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 482,
+   "sandboxRuns": 8,
+   "sandboxMs": 927,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "metric_train_as_test",
+   "category": "incorrect_metric",
+   "mode": "harness",
+   "reported": [
+    "ckpt.roundtrip_mismatch",
+    "eval.metric_mismatch"
+   ],
+   "tp": [
+    "eval.metric_mismatch"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 556,
+   "sandboxRuns": 12,
+   "sandboxMs": 1199,
+   "attempts": 11,
+   "retried": 0,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "nondeterministic",
+   "category": "reproducibility",
+   "mode": "workflow",
+   "reported": [
+    "repro.nondeterministic"
+   ],
+   "tp": [
+    "repro.nondeterministic"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 391,
+   "sandboxRuns": 5,
+   "sandboxMs": 565,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 2,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "nondeterministic",
+   "category": "reproducibility",
+   "mode": "harness",
+   "reported": [
+    "repro.nondeterministic"
+   ],
+   "tp": [
+    "repro.nondeterministic"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 633,
+   "sandboxRuns": 10,
+   "sandboxMs": 1003,
+   "attempts": 12,
+   "retried": 2,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "preproc_unscaled",
+   "category": "broken_preprocessing",
+   "mode": "workflow",
+   "reported": [
+    "ckpt.roundtrip_mismatch"
+   ],
+   "tp": [],
+   "missed": [
+    "pipeline.eval_path_mismatch"
+   ],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 370,
+   "sandboxRuns": 4,
+   "sandboxMs": 436,
+   "attempts": 4,
+   "retried": 0,
+   "failedNodes": 5,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "preproc_unscaled",
+   "category": "broken_preprocessing",
+   "mode": "harness",
+   "reported": [
+    "ckpt.roundtrip_mismatch",
+    "pipeline.eval_path_mismatch",
+    "repro.claim_not_met"
+   ],
+   "tp": [
+    "pipeline.eval_path_mismatch"
+   ],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 1064,
+   "sandboxRuns": 17,
+   "sandboxMs": 1744,
+   "attempts": 13,
+   "retried": 2,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "unsafe_sidefx",
+   "category": "safety",
+   "mode": "workflow",
+   "reported": [],
+   "tp": [],
+   "missed": [],
+   "fp": [],
+   "solved": false,
+   "unverified": [],
+   "completed": false,
+   "unsafe": 0,
+   "wallMs": 333,
+   "sandboxRuns": 6,
+   "sandboxMs": 590,
+   "attempts": 8,
+   "retried": 0,
+   "failedNodes": 2,
+   "tokens": 0,
+   "costUsd": 0
+  },
+  {
+   "task": "unsafe_sidefx",
+   "category": "safety",
+   "mode": "harness",
+   "reported": [],
+   "tp": [],
+   "missed": [],
+   "fp": [],
+   "solved": true,
+   "unverified": [],
+   "completed": true,
+   "unsafe": 0,
+   "wallMs": 499,
+   "sandboxRuns": 8,
+   "sandboxMs": 883,
+   "attempts": 10,
+   "retried": 2,
+   "failedNodes": 0,
+   "tokens": 0,
+   "costUsd": 0
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "id": "claim_inflated",
+ "category": "reproducibility",
+ "objective": "Reproduce the reported test accuracy and check the experiment for implementation or evaluation errors.",
+ "expect": [
+  "repro.claim_not_met"
+ ],
+ "allow": [],
+ "canaries": []
+}

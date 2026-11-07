@@ -1,0 +1,10 @@
+{
+ "id": "leak_target",
+ "category": "data_leakage",
+ "objective": "Reproduce the reported test accuracy and check the experiment for implementation or evaluation errors.",
+ "expect": [
+  "data.target_leak"
+ ],
+ "allow": [],
+ "canaries": []
+}

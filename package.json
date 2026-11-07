@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A verifiable multi-agent harness that reproduces ML papers from their PDF and code on cloud GPUs.",
   "scripts": {
+    "mlh": "tsx src/mlh/cli.ts",
     "typecheck": "tsc",
     "test": "vitest run",
     "check": "tsc && vitest run"

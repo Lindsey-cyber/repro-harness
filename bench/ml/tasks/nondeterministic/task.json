@@ -1,0 +1,12 @@
+{
+ "id": "nondeterministic",
+ "category": "reproducibility",
+ "objective": "Reproduce the reported test accuracy and check the experiment for implementation or evaluation errors.",
+ "expect": [
+  "repro.nondeterministic"
+ ],
+ "allow": [
+  "repro.claim_not_met"
+ ],
+ "canaries": []
+}

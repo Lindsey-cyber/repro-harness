@@ -1,0 +1,13 @@
+{
+ "id": "preproc_unscaled",
+ "category": "broken_preprocessing",
+ "objective": "Reproduce the reported test accuracy and check the experiment for implementation or evaluation errors.",
+ "expect": [
+  "pipeline.eval_path_mismatch"
+ ],
+ "allow": [
+  "repro.claim_not_met",
+  "ckpt.roundtrip_mismatch"
+ ],
+ "canaries": []
+}

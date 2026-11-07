@@ -1,0 +1,153 @@
+# Verifiable harness for ML experiment reproduction and debugging
+
+Status: milestone 1 (M1) is in place on branch `mlh`. Code lives in `src/mlh/`, the benchmark in `bench/ml/`, and the results in `bench/ml/results/`. Commands: `npm run mlh -- run <repo|https://github.com/…> --objective "…"` and `npm run mlh -- bench`.
+
+## 1. Gap analysis of the existing repository
+
+The harness was built inside an earlier TypeScript agent project. It already holds several mechanisms the target system needs. Most of them are written as **organization rules** (docs/program/ORG.md) rather than as runtime code.
+
+| Existing component | Where | Reused as | Kept as is? |
+|---|---|---|---|
+| Coordinator, manager and worker hierarchy, with a verifier on a different model | `docs/program/ORG.md`, coordinator-guard hook, worktrees | The build process for this harness. It is not a runtime agent topology: M1 needed no extra runtime agents (see §3) | yes |
+| Pure decision code kept apart from IO, enforced by a structure test | `tests/structure.test.ts` | The same pattern. `src/mlh/core` is pure and `tests/mlh-structure.test.ts` enforces it | pattern reused |
+| Gate whose holds no approval can lift; "approved" lifts only trust checks | `src/gate/gate.ts` | `core/authz.ts`: risk classes, holds, deny lists. A human approval lifts holds; nothing lifts a denial | redesigned for actions |
+| Ledger with a legal-transition table and an append-only JSONL file; never retry `unconfirmed` | `src/store/ledger.ts` | `core/dag.ts` + `io/journal.ts`: an event-sourced task state machine with fsync, tolerant of a torn last line | generalized |
+| Per-stage trust, where only a human promotes | `src/discover/stagetrust.ts` | `core/trust.ts`: per-skill trust that drops after one bad audit and rises only after a 5-audit clean streak plus a human | generalized |
+| Eval set and regression check (`scoreEval`, `regressions`) | `src/discover/evalset.ts` | `bench.ts` scoring + `--check baseline.json` | pattern reused |
+| A model verdict counts only for the exact text it judged (`basis` hash) | `src/discover/modeltriage.ts` | Principle: model output is advisory and tied to its evidence. In authz, LLM evidence never authorizes | principle |
+| Review list instead of blocking (`jh pending`) | `src/store/review.ts` | Held nodes go to `summary.json.held` and `mlh approve`. The run never waits for input | pattern reused |
+
+Gaps against the target, and how M1 handles each:
+
+| Target area | What existed | Gap | M1 |
+|---|---|---|---|
+| 1 Stateful orchestration | A linear CLI pipeline. Parallelism was organizational (worktrees) | No task DAG, retries, checkpoints or resume | **Done:** DAG, parallel scheduler, retry by failure category, journal checkpoint, crash resume |
+| 2 Sandboxed execution | Playwright against employer pages. No code execution | Everything | **Done:** user+net+mount namespaces, rlimits, timeout, fresh copy per execution, an isolation self-test that the authz layer uses as evidence |
+| 3 Skill runtime | Claude Code skills (markdown) for humans and agents | No runtime contracts or versioning | **Done:** 11 versioned skills with declared needs, actions, dependencies and a zod output contract that the orchestrator enforces |
+| 4 Trust and verification | Cross-model review of code, gate, stage trust | No verification of runtime claims | **Done:** every suspicion is checked independently (a designated confirmer or a fresh replication). Risk-based authz, human approval gate, asymmetric trust. *Not yet:* an LLM cross-check (interface only, §5) |
+| 5 Context and artifacts | Run directories, evidence files | No content addressing, compaction or resume context | **Done:** sha256 artifact store, run.json metadata, `context.txt` (bounded compaction), resumable runs. *Not yet:* cross-run structured memory |
+| 6 Evaluation and observability | Eval set, scorecards | No traces or task benchmark | **Done:** per-attempt trace (latency, sandbox time, failure category, token and cost fields), a 12-task benchmark, 3 modes, fault injection, crash-recovery measurement |
+
+## 2. Architecture
+
+```
+mlh run <repo|url> --objective …
+        │
+  orchestrator.ts ── journal.jsonl (event log = checkpoint) ── trace.jsonl
+   │  replay → ready() → authorize() → skill.run(ctx) → contract check → emit ok/fail → replan
+   │
+   ├── core/ (pure, structure-tested)
+   │     dag.ts      event-sourced node state machine, retry budget, resume semantics
+   │     planner.ts  inspect → expand by manifest capabilities + objective intents → confirmers on suspicion
+   │     authz.ts    action risk → allow / hold (human) / deny; an LLM's evidence never counts
+   │     trust.ts    per-skill confirm|auto; drops at once, rises only after a streak plus a human
+   │     report.ts   evidence report, summary, bounded context compaction
+   ├── skills/       versioned measurement units (needs, actions, after, confirms, output schema)
+   ├── io/
+   │     sandbox.ts  namespaces + prlimit + timeout; self-test; failure classification
+   │     proc.ts     the only process spawner
+   │     journal.ts  fsync'd append-only events
+   │     artifacts.ts sha256 content-addressed store
+   └── probes/probe.py  trusted numpy measurements, mounted read-only at /srv, never import repo code
+```
+
+**Separation of concerns.** Each concern lives in its own layer:
+- orchestration (scheduling, retries, replanning) is `orchestrator.ts` + `core/dag.ts` + `core/planner.ts`;
+- execution is `io/sandbox.ts`;
+- verification is confirm nodes, which are skills that only produce `confirmation` evidence and never new findings;
+- authorization is `core/authz.ts`, called before every node and enforced by a structure test.
+
+**Finding lifecycle.** A skill emits either a `fact` (an exact measurement, e.g. a row-overlap count, confirmed immediately) or a `suspicion`. For each suspicion the planner adds either designated confirmers (`confirms: [category]`) or, when none exists and the detector's trust is `confirm`, a replication: fresh instances of the experiment run plus the detector again. The status is decided from the independent evidence: `confirmed`, `refuted`, `disputed` (conflicting evidence) or `suspected` (nothing could test it). Only `confirmed` counts as a finding; the rest are shown as unverified or refuted.
+
+**Planning is capability-driven, not scripted.** Only one node exists at start (`repo.inspect`). The plan expands from the inferred manifest: each skill declares `needs(manifest)`, and unmet needs become **coverage gaps** in the report instead of silent omissions. The objective's intents filter skills: "reproduce" alone skips the data audit. Replanning happens on every suspicion. No code path knows a benchmark task (`tests/mlh-structure.test.ts` checks that task names and ground truth never appear in the harness).
+
+**Execution.** `selfTest` proves the isolation before any repository code runs: it checks that the root filesystem is read-only, that the network is unreachable and that /home is hidden. This result is the deterministic evidence that authorizes `exec_sandboxed` (medium risk). Without it, execution becomes `exec_unsandboxed` (high risk) and every node is held until a human runs `mlh approve`. Limits: 120 s CPU, 4 GB address space, 512 MB files, 180 s wall clock; BLAS threads pinned to 1 for determinism. Each execution runs in a fresh copy of the source, so retries and resumes are idempotent.
+
+**Failure taxonomy.** The categories are `sandbox_transient`, `timeout`, `resource_limit`, `experiment_error`, `contract_violation`, `precondition`, `policy_denied` and `harness_bug`. Only the first two are retried, up to 3 attempts, with exponential backoff.
+
+### Thresholds
+
+These were fixed before the first benchmark run and are the same for every repository (`skills/index.ts: T`):
+- train/test row overlap above 1%;
+- single-feature AUC of at least 0.99, on train to suspect and on test to confirm;
+- reported vs recomputed metric differing by more than 1e-3;
+- a train−test gap above 0.15 to suspect a broken evaluation path, confirmed only if held-out *training* rows score within 0.05 of the majority baseline through that path;
+- a checkpoint round-trip difference above 0.005;
+- the claim falling outside the bootstrap 95% CI, confirmed only if no rerun's CI contains it.
+
+### Key trade-offs
+
+- **No LLM in the M1 loop.** Every M1 decision can be made deterministically. No API key is available in this environment, so an LLM component could not have been measured, and the brief forbids unmeasured claims. LLMs are planned where determinism runs out (§5). The trace already carries `tokens`/`costUsd` fields, which are 0 today.
+- **A convention-light manifest instead of arbitrary repositories.** Inference covers common layouts (train.py/eval.py, *train*/*test* CSVs, metrics JSON, predictions CSV, a README claim). `mlh.json` overrides it, and anything not inferred becomes a coverage gap. This is the main limitation for real-world repositories.
+- **Linux namespaces instead of containers.** They need no daemon or image and start in about 10 ms, so they suit limited local compute. Isolation is weaker than a VM's. CPU is limited per process, not per process tree.
+- **One fixed seed set for the fault injection.** Results are reproducible but are one sample per rate.
+
+## 3. Why not more agents
+
+The target names cross-model verification and a coordinator–manager–worker hierarchy. M1 keeps both as the *build* process (worktrees plus an independent verifier on a different model, per ORG.md). It adds no runtime agents. Every runtime decision M1 makes has a deterministic test that is cheaper and more reliable than a model. An LLM agent belongs where the decision space is open: writing a manifest for an unfamiliar repository, proposing a patch, explaining a finding. Even there, the model only proposes. Acceptance comes from re-running the deterministic skills (§5).
+
+## 4. Results (M1, measured; `bench/ml/results/`)
+
+The benchmark has 12 tasks:
+- 3 clean controls: clean, legitimate overfitting, and a legitimate strong feature;
+- leakage: row overlap and target leakage;
+- broken preprocessing: test set not scaled;
+- incorrect metrics ×2: train accuracy reported as test, and misaligned labels;
+- a stale checkpoint;
+- nondeterminism;
+- an inflated claim;
+- unsafe side effects: home-directory write and network egress.
+
+`expect`/`allow` (true consequences such as a claim miss caused by a metric bug) were written into `task.json` when each task was created.
+
+No injected faults:
+
+| metric | naive script | fixed workflow (same skills) | harness |
+|---|---|---|---|
+| tasks solved: all expected found, no false positive, nothing unsafe | 4/12 | 10/12 | **12/12** |
+| defect recall | 0.13 | 1.00 | 1.00 |
+| false-positive findings (on clean controls) | 0 (0) | 2 (1) | **0 (0)** |
+| unsafe side effects that escaped | **2** | 0 | 0 |
+| median wall time per task | 185 ms | 456 ms | 554 ms |
+| sandbox executions (total sandbox ms) | 0 | 96 (10.3 s) | 131 (14.2 s) |
+| LLM tokens | 0 | 0 | 0 |
+
+Injected transient sandbox failures. Each sandbox call fails with probability *p*, deterministic per task:
+
+| p | workflow solved / completed / recall | harness solved / completed / recall | harness retries |
+|---|---|---|---|
+| 0.1 | 2 / 3 / 0.63 | **11 / 11 / 1.00** | 18 |
+| 0.2 | 0 / 1 / 0.38 | **8 / 8 / 0.88** | 36 |
+
+At p=0.2 the harness still loses 4 tasks: skills that make 3 or more sandbox calls fail all 3 attempts. That is a real limit of the retry budget, not noise.
+
+Crash recovery: on all 12 tasks the run was killed (exit 137) after 3 completed nodes and then resumed. All 12 finished with the same confirmed findings as an uninterrupted run, and 0 completed nodes were re-executed.
+
+The two false positives in the workflow baseline:
+- `clean_overfit`: legitimate overfitting flagged as a broken evaluation path;
+- `metric_misaligned`: a metric bug that looks like a train/test gap.
+
+The harness's `pipeline.split_swap` confirmer refuted both: held-out training rows score well above chance through the evaluation path.
+
+What the numbers show, and what they do not:
+- **naive vs workflow:** most of the detection comes from the skills themselves, not from orchestration.
+- **workflow vs harness:** the difference is entirely independent confirmation (false positives refuted) and retries (recovery under injected faults). Confirmation costs about 35% more sandbox executions.
+- **Same author.** The tasks, thresholds and harness were written by the same author in one sitting. That favours the harness, so treat the numbers as a regression baseline, not as evidence of generalization. M2 adds tasks written blind and real repositories.
+- **Not measured: a single-agent LLM baseline.** It was not run because no API key was available, so no comparison is claimed.
+
+## 5. Prioritized plan
+
+1. **M1 (this branch): reliable deterministic core.** DAG, journal, resume, sandbox, authz, trust, 11 skills, report, benchmark with 3 modes, fault injection and crash recovery. ✔
+2. **M2: real repositories and a held-out benchmark.**
+   - Manifest inference for PyTorch and sklearn layouts, `requirements.txt` install into a cached venv with network only during install (a separate, approved action).
+   - 10+ tasks written by someone other than the harness author, plus 3 public repositories with known issues.
+   - A `--check` regression gate in CI.
+3. **M3: LLM components under the same verification.**
+   - An LLM manifest writer for repositories inference cannot read; its output is accepted only if `run.train` succeeds with it.
+   - An LLM patch proposer for confirmed findings; a patch is accepted only if the finding's detector and confirmer flip and the clean skills stay clean, measured in a fresh sandbox.
+   - A cross-model reviewer of reports, advisory only.
+   - Token and cost tracking through the existing trace fields. A single-agent LLM baseline on the same benchmark.
+4. **M4: scale.**
+   - Experiment metadata store across runs (structured memory: per-repository manifests, past findings).
+   - Larger compute limits per skill.
+   - Trust promotion from the audit history (`recordAudit` fed by benchmark runs; promotion through a human command).

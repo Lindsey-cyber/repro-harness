@@ -1,0 +1,10 @@
+{
+ "id": "leak_overlap",
+ "category": "data_leakage",
+ "objective": "Reproduce the reported test accuracy and check the experiment for implementation or evaluation errors.",
+ "expect": [
+  "data.train_test_overlap"
+ ],
+ "allow": [],
+ "canaries": []
+}

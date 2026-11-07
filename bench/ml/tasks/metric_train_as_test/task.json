@@ -1,0 +1,13 @@
+{
+ "id": "metric_train_as_test",
+ "category": "incorrect_metric",
+ "objective": "Reproduce the reported test accuracy and check the experiment for implementation or evaluation errors.",
+ "expect": [
+  "eval.metric_mismatch"
+ ],
+ "allow": [
+  "repro.claim_not_met",
+  "ckpt.roundtrip_mismatch"
+ ],
+ "canaries": []
+}

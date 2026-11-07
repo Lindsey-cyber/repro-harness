@@ -1,0 +1,10 @@
+{
+ "id": "ckpt_stale",
+ "category": "checkpoint_failure",
+ "objective": "Reproduce the reported test accuracy and check the experiment for implementation or evaluation errors.",
+ "expect": [
+  "ckpt.roundtrip_mismatch"
+ ],
+ "allow": [],
+ "canaries": []
+}
