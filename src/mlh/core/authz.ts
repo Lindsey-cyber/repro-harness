@@ -9,7 +9,8 @@ export type Action =
   | "exec_unsandboxed" // run repository code on the host
   | "network_egress" // repository code reaching the network
   | "write_outside_workspace"
-  | "publish"; // push, open a PR, post anywhere
+  | "publish" // push, open a PR, post anywhere
+  | "model_query"; // send repository content to an external model provider
 
 export type Risk = "low" | "medium" | "high";
 
@@ -21,6 +22,8 @@ export const RISK: Record<Action, Risk> = {
   network_egress: "high",
   write_outside_workspace: "high",
   publish: "high",
+  // Data leaves the machine: only the human's standing approval (the --llm flag) allows it.
+  model_query: "high",
 };
 
 export interface Evidence {

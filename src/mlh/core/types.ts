@@ -3,6 +3,7 @@
 export type FailureCategory =
   | "sandbox_transient" // the sandbox failed to start or died for reasons outside the experiment
   | "timeout"
+  | "provider_transient" // the model provider failed or returned an unusable answer
   | "resource_limit" // cpu, memory or file-size limit hit
   | "experiment_error" // the repository's own code exited non-zero
   | "contract_violation" // a skill's output did not match its declared schema
@@ -11,7 +12,7 @@ export type FailureCategory =
   | "harness_bug";
 
 // Only failures that a fresh attempt can plausibly fix are retried.
-export const RETRYABLE: readonly FailureCategory[] = ["sandbox_transient", "timeout"];
+export const RETRYABLE: readonly FailureCategory[] = ["sandbox_transient", "timeout", "provider_transient"];
 
 export interface Manifest {
   train?: string[];
@@ -19,8 +20,13 @@ export interface Manifest {
   data?: { train: string; test: string; label?: string };
   outputs?: { metrics?: string; predictions?: string; checkpoint?: string; evalMetrics?: string };
   metric?: string;
+  // Keys in the metrics files when they are not the metric's own name.
+  metricKey?: string;
+  trainMetricKey?: string;
   claim?: { metric: string; value: number };
   seedEnv?: string;
+  // CLI flag the training script reads its seed from (e.g. --seed).
+  seedArg?: string;
 }
 
 export type Severity = "high" | "medium" | "low";

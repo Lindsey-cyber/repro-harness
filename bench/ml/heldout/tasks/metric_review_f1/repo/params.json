@@ -1,0 +1,1 @@
+{"lr": 0.05, "epochs": 120, "l2": 0.02, "threshold": 0.5, "seed": 5, "test_frac": 0.3}

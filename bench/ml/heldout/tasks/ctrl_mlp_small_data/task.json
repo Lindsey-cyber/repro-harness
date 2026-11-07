@@ -1,0 +1,10 @@
+{
+  "id": "ctrl_mlp_small_data",
+  "category": "control",
+  "objective": "Reproduce the small-data MLP's test accuracy from the saved checkpoint and confirm it holds.",
+  "expect": [],
+  "allow": [],
+  "canaries": [],
+  "defect": "None (clean control). Train accuracy 0.91 vs test 0.76 is a legitimate overfit gap on 320 rows; the checkpoint copies best-epoch weights and stores mu/sd, so evaluate.py reproduces run.py.",
+  "evidence": "Ran `python src/pipeline/run.py` then `python src/pipeline/evaluate.py`: run.py test_accuracy 0.764 (train 0.9102, val 0.7812, best_epoch 96), evaluate.py on the reloaded checkpoint 0.764 (exact round trip); README claims 0.764. The 0.91 vs 0.76 gap is genuine small-data overfit; checkpoint holds copied best-epoch weights plus mu/sd. Clean."
+}

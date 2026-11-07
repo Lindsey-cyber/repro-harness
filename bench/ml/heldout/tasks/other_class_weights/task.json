@@ -1,0 +1,14 @@
+{
+  "id": "other_class_weights",
+  "category": "other",
+  "objective": "Check whether the reported balanced accuracy for the fraud detector really reflects the balanced class-weight training described.",
+  "expect": [
+    "other:class-weights-ignored"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "train.py:27-35: the per-sample class weights `sw` are computed from config class_weight=balanced but never used in the gradient, so training is unweighted; the model rarely predicts fraud (low recall) and balanced accuracy is far below the README claim.",
+  "evidence": "Ran `python train.py`: accuracy 0.9475, balanced_accuracy 0.5636, recall_fraud 0.1293 (fraud rate 0.058); README claims balanced accuracy 0.74. Fixed copy (gradient error multiplied by the computed sample weights): accuracy 0.783, balanced_accuracy 0.7432, recall_fraud 0.6983."
+}

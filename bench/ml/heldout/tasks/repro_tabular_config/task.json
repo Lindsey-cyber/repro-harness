@@ -1,0 +1,12 @@
+{
+  "id": "repro_tabular_config",
+  "category": "reproducibility",
+  "objective": "Reproduce the headline AUC in the README by running the repo as documented.",
+  "expect": [
+    "repro.claim_not_met"
+  ],
+  "allow": [],
+  "canaries": [],
+  "defect": "README quotes AUC 0.919, which comes from configs/long.json (polynomial terms, 800 epochs; see notes/experiments.md) but the documented command uses configs/default.json (linear, 200 epochs), which scores much lower.",
+  "evidence": "Ran `python src/exp/run.py` (the documented command, configs/default.json): test_auc 0.6898, deterministic on rerun; README claims 0.919. `python src/exp/run.py --config configs/long.json` gives test_auc 0.919 (polynomial terms, 800 epochs), the number in notes/experiments.md. The claim is reproducible only with a config the README does not use."
+}

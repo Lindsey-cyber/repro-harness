@@ -1,0 +1,14 @@
+{
+  "id": "leak_merchant_encoding",
+  "category": "data_leakage",
+  "objective": "The merchant fraud-rate feature seems to help a lot. Check the AUC claim is not an artifact.",
+  "expect": [
+    "data.target_leak"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "scripts/fit_and_score.py:28-29 computes the per-merchant mean of is_fraud over ALL rows (including the test rows) before the split, so each test row's own label is inside its merchant_rate feature (merchant has no real effect in the data).",
+  "evidence": "Ran `python scripts/fit_and_score.py`: test_auc 0.8225; README claims 0.82 so it reproduces. Fixed copy (merchant mean-target encoding fit on the 70% train rows only, unseen merchants get the train mean): test_auc 0.5951. The generator gives merchant no effect on the label."
+}

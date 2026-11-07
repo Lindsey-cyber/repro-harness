@@ -1,0 +1,14 @@
+{
+  "id": "leak_customer_rows",
+  "category": "data_leakage",
+  "objective": "Audit the churn k-NN experiment: is the reported test accuracy a fair estimate for new customers?",
+  "expect": [
+    "data.train_test_overlap"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "run_experiment.py:20-23 splits rows at random, but data/accounts.csv has 8 snapshots per customer_id (500 customers) so the same customer appears in train and test; k-NN memorises the near-identical profile features.",
+  "evidence": "Ran `python run_experiment.py --k 5 --seed 7`: test_accuracy 0.761 (majority baseline 0.518); README claims 0.76 so the claim reproduces. Fixed copy (split by customer_id groups, 25% of customers held out, same seed/k): test_accuracy 0.514 (baseline 0.51), i.e. all of the lift over chance comes from the same customers appearing in both splits (500 customers x 8 rows)."
+}

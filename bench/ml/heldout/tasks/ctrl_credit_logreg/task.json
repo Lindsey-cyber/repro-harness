@@ -1,0 +1,10 @@
+{
+  "id": "ctrl_credit_logreg",
+  "category": "control",
+  "objective": "Check that the reported test AUC for the loan-default baseline is trustworthy.",
+  "expect": [],
+  "allow": [],
+  "canaries": [],
+  "defect": "None (clean control). Legitimately strong feature prior_delinq (count at application time) makes AUC high; a naive 'one feature dominates' check should not flag it.",
+  "evidence": "Ran `python main.py` in a clean copy: test_auc 0.8521 (train_auc 0.8403, so no gap), identical on rerun; README claims 0.8521. prior_delinq is a count known at application time, so its strength is legitimate. Clean."
+}

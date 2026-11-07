@@ -1,0 +1,10 @@
+{
+  "train_path": "data/train.csv",
+  "test_path": "data/test.csv",
+  "label": "renewed",
+  "categorical": ["plan", "channel"],
+  "numeric": ["seats", "usage_hours", "support_tickets"],
+  "lr": 0.2,
+  "epochs": 500,
+  "out_dir": "out"
+}

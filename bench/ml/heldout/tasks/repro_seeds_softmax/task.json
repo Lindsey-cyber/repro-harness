@@ -1,0 +1,14 @@
+{
+  "id": "repro_seeds_softmax",
+  "category": "reproducibility",
+  "objective": "A colleague says python train.py --seed 0 gives a different accuracy every time. Verify the README's claim.",
+  "expect": [
+    "repro.nondeterministic"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "train.py:16-17 and :28: --seed seeds only the legacy np.random/random generators (weight init); the minibatch order comes from np.random.default_rng() with no seed, so the same command gives different accuracies.",
+  "evidence": "Ran `python train.py --seed 0` 10 times in clean copies: 0.8367 0.8367 0.8233 0.8267 0.8433 0.8433 0.84 0.84 0.8233 0.8467 (range 0.8233-0.8467); README claims 0.85 for seed 0. Fixed copy (default_rng(args.seed)): 0.8467 on 4 of 4 runs."
+}

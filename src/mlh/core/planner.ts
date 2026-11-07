@@ -24,6 +24,9 @@ export interface SkillSpec {
   after: string[];
   // Finding categories this skill independently tests (a designated confirmer).
   confirms?: string[];
+  // Confirms any suspicion whose evidence.origin is this (e.g. "llm"): such
+  // suspicions carry none of the detector-specific evidence category confirmers read.
+  confirmsOrigin?: string;
   // Re-running the experiment from scratch (a fresh run is a replication).
   fresh?: boolean;
   // Its suspicions can be confirmed by re-running it on a fresh experiment run.
@@ -89,6 +92,11 @@ export function confirmations(s: RunState, findingId: string, specs: SkillSpec[]
   const spec = (id: string) => specs.find((x) => x.id === id);
   const tag = findingId.replace(/[^\w.-]+/g, "_");
   const out: TaskNode[] = [];
+  const origin = typeof f.evidence.origin === "string" ? f.evidence.origin : undefined;
+  if (origin) {
+    return specs.filter((x) => x.confirmsOrigin === origin && x.needs(manifest) === null)
+      .map((c) => ({ id: `${c.id}@${tag}`, skill: c.id, deps: [INSPECT, detector.id], purpose: "confirm" as const, params: {}, target: findingId }));
+  }
   for (const c of specs.filter((x) => x.confirms?.includes(f.category) && x.needs(manifest) === null)) {
     // A confirmer reads the same inputs the detector read, plus the detector's own output.
     const deps = [...new Set([INSPECT, ...c.after.map((a) => (a === detector.skill ? detector.id : findNode(s, a))).filter((d): d is string => !!d)])];

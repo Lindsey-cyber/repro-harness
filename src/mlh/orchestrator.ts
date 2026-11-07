@@ -14,7 +14,8 @@ import { ArtifactStore } from "./io/artifacts.ts";
 import { Journal } from "./io/journal.ts";
 import { runProc } from "./io/proc.ts";
 import { DEFAULT_LIMITS, Sandbox, selfTest, SkillError, type Isolation, type Limits, type SandboxStats } from "./io/sandbox.ts";
-import { skill, SKILLS, type SkillCtx } from "./skills/index.ts";
+import { addUsage, meter, zeroUsage, type Usage } from "./io/llm.ts";
+import { skill, SKILLS, type Models, type SkillCtx } from "./skills/index.ts";
 
 export type Mode = "harness" | "workflow";
 
@@ -29,13 +30,16 @@ export interface RunOptions {
   crashAfter?: number; // exit the process after this many completed nodes (recovery tests)
   trustFile?: string;
   isolation?: Isolation; // force; default is what the self-test proves
+  // Models for the LLM skills. Passing them is the human's standing approval to
+  // send repository content to that provider (the only evidence for model_query).
+  llm?: Models;
 }
 
 export interface RunResult {
   state: RunState;
   summary: Summary;
   reportPath: string;
-  stats: { sandboxRuns: number; sandboxMs: number; wallMs: number; attempts: number; retried: number };
+  stats: { sandboxRuns: number; sandboxMs: number; wallMs: number; attempts: number; retried: number; llm: Usage };
 }
 
 const now = () => new Date().toISOString();
@@ -99,19 +103,20 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const stats: SandboxStats = { runs: 0, ms: 0 };
   const limits = o.limits ?? DEFAULT_LIMITS;
   const concurrency = o.concurrency ?? 3;
-  let completedHere = 0, retried = 0, attemptsHere = 0;
+  let completedHere = 0, retried = 0, attemptsHere = 0, llmTotal = zeroUsage();
+  const specs = SKILLS.filter((s) => o.llm || !s.actions.includes("model_query"));
   const manifest = (): Manifest => ((state.nodes.get(INSPECT)?.output as { manifest?: Manifest } | undefined)?.manifest ?? {});
 
   const afterOk = (n: TaskNode, findings: number) => {
     if (n.id === INSPECT) {
-      const x = expand(state.objective, manifest(), SKILLS);
+      const x = expand(state.objective, manifest(), specs);
       for (const node of x.nodes) emit({ t: "node", at: now(), node, why: "expanded from manifest" });
       for (const g of x.gaps) emit({ t: "gap", at: now(), skill: g.skill, reason: g.reason });
     }
     if (mode !== "harness" || n.purpose === "confirm") return;
     for (let i = 0; i < findings; i++) {
       const fid = `${n.id}/${i}`;
-      for (const node of confirmations(state, fid, SKILLS, manifest(), trust)) {
+      for (const node of confirmations(state, fid, specs, manifest(), trust)) {
         if (!state.nodes.has(node.id)) emit({ t: "node", at: now(), node, why: `confirm ${fid}` });
       }
     }
@@ -122,6 +127,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     const sk = skill(n.skill);
     // Authorization first: sandboxed execution is only sandboxed if the self-test proved it.
     const evidence: Evidence[] = [isolationEvidence, ...(ns.approved ? [{ kind: "human" as const, check: `approval:${n.id}`, ok: true }] : [])];
+    if (o.llm) evidence.push({ kind: "human", check: "--llm standing approval", ok: true, action: "model_query" });
     for (const a of sk.actions) {
       const action: Action = a === "exec_sandboxed" && st.isolation !== "namespace" ? "exec_unsandboxed" : a;
       const d = authorize(action, evidence);
@@ -137,7 +143,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     const started = performance.now(), before = { ...stats };
     const saved: { name: string; sha256: string; bytes: number }[] = [];
     let label = 0;
+    const models = o.llm ? { proposer: meter(o.llm.proposer), reviewer: meter(o.llm.reviewer) } : undefined;
     const ctx: SkillCtx = {
+      ...(models ? { llm: models } : {}),
       node: n, state, manifest: manifest(),
       target: n.target ? state.findings.get(n.target) : undefined,
       dep: (s) => {
@@ -168,10 +176,12 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
         confirmation = { target: n.target, supports: again.length > 0, note: again.length ? `replicated on a fresh run: ${again[0]!.summary}` : `not reproduced on a fresh run` };
       }
       emit({ t: "ok", at: now(), id: n.id, output: out.output, findings, artifacts: saved, ...(confirmation ? { confirmation } : {}) });
+      if (out.gap) emit({ t: "gap", at: now(), skill: sk.id, reason: out.gap });
       outcome = "ok";
       afterOk(n, findings.length);
     } catch (e) {
-      const cat = e instanceof SkillError ? e.category : "harness_bug";
+      // A model call that failed or returned garbage is a transient fault of the provider, not a harness bug.
+      const cat = e instanceof SkillError ? e.category : /LLM|model returned/.test(String(e)) ? "provider_transient" : "harness_bug";
       emit({ t: "fail", at: now(), id: n.id, category: cat, message: String((e as Error).message ?? e).slice(0, 2000) });
       outcome = "fail"; category = cat;
       if (state.nodes.get(n.id)!.status === "pending") {
@@ -179,7 +189,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
         await new Promise((r) => setTimeout(r, 50 * 2 ** attempt));
       }
     }
-    appendFileSync(tracePath, JSON.stringify({ at: now(), id: n.id, skill: sk.id, version: sk.version, attempt, outcome, category, ms: Math.round(performance.now() - started), sandboxRuns: stats.runs - before.runs, sandboxMs: Math.round(stats.ms - before.ms), isolation: st.isolation, tokens: 0, costUsd: 0 }) + "\n");
+    const used = models ? addUsage(models.proposer.usage, models.reviewer.usage) : zeroUsage();
+    llmTotal = addUsage(llmTotal, used);
+    appendFileSync(tracePath, JSON.stringify({ at: now(), id: n.id, skill: sk.id, version: sk.version, attempt, outcome, category, ms: Math.round(performance.now() - started), sandboxRuns: stats.runs - before.runs, sandboxMs: Math.round(stats.ms - before.ms), isolation: st.isolation, llmCalls: used.calls, tokens: used.promptTokens + used.completionTokens, costUsd: Number(used.costUsd.toFixed(6)), llmMs: Math.round(used.ms) }) + "\n");
     if (outcome === "ok" && o.crashAfter !== undefined && ++completedHere >= o.crashAfter) process.exit(137);
   };
 
@@ -203,5 +215,5 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const summary = summarize(state);
   writeFileSync(join(runDir, "summary.json"), JSON.stringify(summary, null, 1));
   writeFileSync(join(runDir, "context.txt"), compact(state));
-  return { state, summary, reportPath, stats: { sandboxRuns: stats.runs, sandboxMs: Math.round(stats.ms), wallMs: Math.round(performance.now() - t0), attempts: attemptsHere, retried } };
+  return { state, summary, reportPath, stats: { sandboxRuns: stats.runs, sandboxMs: Math.round(stats.ms), wallMs: Math.round(performance.now() - t0), attempts: attemptsHere, retried, llm: llmTotal } };
 }

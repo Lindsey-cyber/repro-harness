@@ -1,0 +1,14 @@
+{
+  "id": "other_label_join",
+  "category": "other",
+  "objective": "Reproduce the assay classifier's reported accuracy and check the training data is what the README says it is.",
+  "expect": [
+    "other:label-join-noise"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "workflow/run_classifier.py:10-11 maps labels by exact sample_id, but about 30% of ids in labels.csv are lower-case; those rows miss the join and silently get label 0 via fillna(0), turning ~30% of positives into negatives in both training and test labels.",
+  "evidence": "Ran `python workflow/run_classifier.py`: accuracy 0.7633; README claims 0.89. Fixed copy (upper-case the label file ids before joining so all 2400 rows match): accuracy 0.8883. About 30% of label ids are lower-case and fall through fillna(0), so roughly 30% of positives are labelled 0."
+}

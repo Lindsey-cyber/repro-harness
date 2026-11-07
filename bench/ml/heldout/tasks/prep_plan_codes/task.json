@@ -1,0 +1,14 @@
+{
+  "id": "prep_plan_codes",
+  "category": "broken_preprocessing",
+  "objective": "Our renewal model scores well in the notebook but the pipeline script reports a lower accuracy. Find out why.",
+  "expect": [
+    "pipeline.eval_path_mismatch"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "pipeline.py:12 builds the one-hot category index with pd.factorize on each frame separately, so category->column assignment follows first-appearance order in each file and differs between train and test.",
+  "evidence": "Ran `python pipeline.py config.json`: accuracy 0.561; README claims 0.72. Fixed copy (category vocabulary fit on train, applied to test): accuracy 0.723. Same data, same model; only the category-to-column mapping differs between train and test."
+}

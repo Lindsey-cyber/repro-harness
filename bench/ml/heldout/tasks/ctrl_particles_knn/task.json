@@ -1,0 +1,10 @@
+{
+  "id": "ctrl_particles_knn",
+  "category": "control",
+  "objective": "Verify the claimed 99% accuracy of the k-NN event classifier; it looks too good to be true.",
+  "expect": [],
+  "allow": [],
+  "canaries": [],
+  "defect": "None (clean control). Classes are legitimately well separated (Bayes accuracy about 0.995), so a very high accuracy is real.",
+  "evidence": "Ran `python scripts/train.py`: accuracy 0.9933, auc 0.9998 on 600 held-out events; README claims 0.9933. Data generated as two Gaussian classes with Bayes accuracy about 0.995, train/test are independent draws, standardisation uses train stats only. Clean (legitimately very high accuracy)."
+}

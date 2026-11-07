@@ -1,0 +1,14 @@
+{
+  "id": "metric_review_f1",
+  "category": "incorrect_metric",
+  "objective": "Check that the F1 number for the positive class is computed correctly from the model's predictions.",
+  "expect": [
+    "eval.metric_mismatch"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "train.py:38-39 compares the raw decision function (logits) to the 0.5 probability threshold, so 'pred' is positive only when logit>0.5 (p>0.62); the README's 0.5 probability threshold is not what is applied and recall collapses.",
+  "evidence": "Ran `python train.py`: f1 0.2779 (positive_rate_test 0.4578); README claims 0.58 at a 0.5 probability threshold. Fixed copy (sigmoid applied to the decision function before the 0.5 threshold): f1 0.5756. Same trained weights in both runs."
+}

@@ -6,11 +6,15 @@ import { replay } from "./core/dag.ts";
 import { compact } from "./core/report.ts";
 import { Journal } from "./io/journal.ts";
 import { runHarness, type Mode } from "./orchestrator.ts";
+import { Llm } from "./io/llm.ts";
 import { SKILLS } from "./skills/index.ts";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (name: string): string | undefined => { const i = rest.indexOf(`--${name}`); return i >= 0 ? rest[i + 1] : undefined; };
-const positional = rest.filter((a, i) => !a.startsWith("--") && !rest[i - 1]?.startsWith("--"));
+// --llm: the human's standing approval to send repository content to the model provider.
+const models = () => rest.includes("--llm") ? { llm: { proposer: new Llm({ model: flag("proposer") ?? "deepseek-flash", cacheDir: ".mlh/llm-cache" }), reviewer: new Llm({ model: flag("reviewer") ?? "deepseek-v4-pro", cacheDir: ".mlh/llm-cache" }) } } : {};
+const BOOLEAN = new Set(["--llm", "--crash"]);
+const positional = rest.filter((a, i) => !a.startsWith("--") && !(rest[i - 1]?.startsWith("--") && !BOOLEAN.has(rest[i - 1]!)));
 
 async function main(): Promise<void> {
   switch (cmd) {
@@ -22,12 +26,13 @@ async function main(): Promise<void> {
         ...(flag("crash-after") ? { crashAfter: Number(flag("crash-after")) } : {}),
         ...(flag("faults") ? { faults: { rate: Number(flag("faults")), seed: 1 } } : {}),
         ...(flag("trust") ? { trustFile: flag("trust")! } : {}),
+        ...models(),
       });
       console.log(`${r.reportPath}\nconfirmed: ${r.summary.confirmed.map((f) => f.category).join(", ") || "none"}; unverified: ${r.summary.unverified.length}; held: ${r.summary.held.length}`);
       break;
     }
     case "resume": {
-      const r = await runHarness({ runDir: positional[0]!, ...(flag("trust") ? { trustFile: flag("trust")! } : {}) });
+      const r = await runHarness({ runDir: positional[0]!, ...(flag("trust") ? { trustFile: flag("trust")! } : {}), ...models() });
       console.log(`${r.reportPath}\nconfirmed: ${r.summary.confirmed.map((f) => f.category).join(", ") || "none"}`);
       break;
     }
@@ -50,7 +55,7 @@ async function main(): Promise<void> {
     }
     case "bench": {
       const { runBench } = await import("./bench.ts");
-      await runBench({ modes: (flag("modes") ?? "naive,workflow,harness").split(",") as never, faults: Number(flag("faults") ?? 0), out: flag("out") ?? "bench/ml/results", ...(flag("tasks") ? { tasks: flag("tasks")!.split(",") } : {}), ...(flag("check") ? { check: flag("check")! } : {}), crash: rest.includes("--crash") });
+      await runBench({ modes: (flag("modes") ?? "naive,workflow,harness").split(",") as never, set: flag("set") ?? "tasks", faults: Number(flag("faults") ?? 0), out: flag("out") ?? "bench/ml/results", ...(flag("tasks") ? { tasks: flag("tasks")!.split(",") } : {}), ...(flag("check") ? { check: flag("check")! } : {}), crash: rest.includes("--crash"), parallel: Number(flag("parallel") ?? 6) });
       break;
     }
     default:

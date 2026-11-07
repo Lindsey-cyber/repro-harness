@@ -1,0 +1,1 @@
+{"epochs": 200, "lr": 0.1, "l2": 0.01, "poly": false, "seed": 1}

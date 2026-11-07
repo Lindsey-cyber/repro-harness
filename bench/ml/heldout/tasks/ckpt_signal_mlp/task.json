@@ -1,0 +1,15 @@
+{
+  "id": "ckpt_signal_mlp",
+  "category": "checkpoint_failure",
+  "objective": "Make sure the checkpoint we ship reproduces the accuracy in the README.",
+  "expect": [
+    "ckpt.roundtrip_mismatch"
+  ],
+  "allow": [
+    "repro.claim_not_met",
+    "pipeline.eval_path_mismatch"
+  ],
+  "canaries": [],
+  "defect": "scripts/train.py:66 saves only the weights to checkpoints/best.npz (the training-set mean/std used for standardisation are not stored) and scripts/eval_ckpt.py:20 feeds raw, unstandardised features to the loaded weights, so the reloaded checkpoint does not reproduce final.json.",
+  "evidence": "Ran `python scripts/train.py && python scripts/eval_ckpt.py`: final.json best_epoch 98, val_acc 0.7, test_acc 0.7343 (README claim 0.7343 matches the log); eval_ckpt.py on checkpoints/best.npz gives val_acc 0.4467, test_acc 0.4943. Fixed copy (mu/sd saved in the checkpoint and applied in eval_ckpt.py): eval gives val_acc 0.7, test_acc 0.7343, an exact round trip."
+}

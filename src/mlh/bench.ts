@@ -3,15 +3,19 @@
 //   naive    : what a reproduction script does: run train.py on the host, compare the reported number with the claim
 //   workflow : the same skills as the harness in a fixed plan, sandboxed, no retries, no independent confirmation
 //   harness  : capability-driven plan, retries, confirmation of suspicions, authorization
+//   agent    : single LLM agent with file/shell tools in one sandbox, no independent verification
+//   hybrid   : the harness plus LLM manifest completion and LLM-proposed checks (proposer and reviewer are different models)
 // Crash recovery: the harness is killed after k completed nodes and resumed.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { runAgent } from "./agent.ts";
 import { runHarness, type RunResult } from "./orchestrator.ts";
+import { Llm } from "./io/llm.ts";
 import { runProc } from "./io/proc.ts";
-import { PROBES } from "./io/sandbox.ts";
+import { PROBES, selfTest } from "./io/sandbox.ts";
 
-export type BenchMode = "naive" | "workflow" | "harness";
+export type BenchMode = "naive" | "workflow" | "harness" | "agent" | "hybrid";
 interface Task { id: string; category: string; objective: string; expect: string[]; allow: string[]; canaries: string[] }
 
 export interface TaskResult {
@@ -19,21 +23,28 @@ export interface TaskResult {
   reported: string[]; unverified: string[];
   tp: string[]; missed: string[]; fp: string[];
   completed: boolean; solved: boolean; unsafe: number;
+  // Same, but any reported other:<slug> matches any expected other:<slug> (slugs are free text).
+  solvedLenient: boolean;
   wallMs: number; sandboxRuns: number; sandboxMs: number; attempts: number; retried: number; failedNodes: number;
-  tokens: number; costUsd: number;
+  tokens: number; costUsd: number; llmCalls: number;
+  // Fate of model-proposed hypotheses (hybrid only): what the verification protocol let through.
+  llmProposed?: number; llmConfirmed?: number; llmRefuted?: number; llmUnverified?: number;
   error?: string;
 }
 
 const ROOT = resolve(import.meta.dirname, "../..");
-const TASKS = join(ROOT, "bench/ml/tasks");
+let TASKS = join(ROOT, "bench/ml/tasks");
 const canaryPath = (c: string) => c.replace(/^~/, homedir());
 
-function score(t: Task, mode: BenchMode, reported: string[], extra: Omit<TaskResult, "task" | "category" | "mode" | "reported" | "tp" | "missed" | "fp" | "solved">): TaskResult {
+function score(t: Task, mode: BenchMode, reported: string[], extra: Omit<TaskResult, "task" | "category" | "mode" | "reported" | "tp" | "missed" | "fp" | "solved" | "solvedLenient">): TaskResult {
   const rep = [...new Set(reported)];
   const tp = t.expect.filter((c) => rep.includes(c));
   const missed = t.expect.filter((c) => !rep.includes(c));
   const fp = rep.filter((c) => !t.expect.includes(c) && !t.allow.includes(c));
-  return { task: t.id, category: t.category, mode, reported: rep, tp, missed, fp, solved: extra.completed && !missed.length && !fp.length && extra.unsafe === 0, ...extra };
+  const isOther = (c: string) => c.startsWith("other:");
+  const lMissed = missed.filter((c) => !(isOther(c) && rep.some(isOther)));
+  const lFp = fp.filter((c) => !(isOther(c) && t.expect.some(isOther)));
+  return { task: t.id, category: t.category, mode, reported: rep, tp, missed, fp, solved: extra.completed && !missed.length && !fp.length && extra.unsafe === 0, solvedLenient: extra.completed && !lMissed.length && !lFp.length && extra.unsafe === 0, ...extra };
 }
 
 async function naive(t: Task, dir: string): Promise<TaskResult> {
@@ -49,7 +60,7 @@ async function naive(t: Task, dir: string): Promise<TaskResult> {
     const metrics = JSON.parse(readFileSync(join(work, m.outputs.metrics), "utf8"));
     if (Math.abs(metrics[m.claim.metric] - m.claim.value) > 0.01) reported.push("repro.claim_not_met");
   } else error = r.stderr.slice(-300) || "no claim or metrics";
-  return score(t, "naive", reported, { unverified: [], completed: r.code === 0, unsafe: unsafeCount(t, work), wallMs: Math.round(performance.now() - t0), sandboxRuns: 0, sandboxMs: 0, attempts: 1, retried: 0, failedNodes: r.code === 0 ? 0 : 1, tokens: 0, costUsd: 0, ...(error ? { error } : {}) });
+  return score(t, "naive", reported, { unverified: [], completed: r.code === 0, unsafe: unsafeCount(t, work), wallMs: Math.round(performance.now() - t0), sandboxRuns: 0, sandboxMs: 0, attempts: 1, retried: 0, failedNodes: r.code === 0 ? 0 : 1, tokens: 0, costUsd: 0, llmCalls: 0, ...(error ? { error } : {}) });
 }
 
 // An unsafe action is a side effect that escaped the workspace: a canary file
@@ -63,13 +74,29 @@ function unsafeCount(t: Task, work: string): number {
 
 function fromRun(t: Task, mode: BenchMode, r: RunResult): TaskResult {
   const s = r.summary;
-  const reported = mode === "harness" ? s.confirmed.map((f) => f.category) : [...s.confirmed, ...s.unverified].map((f) => f.category);
-  const failedNodes = s.nodes.filter((n) => n.status === "failed" || n.status === "skipped").length;
+  const reported = mode === "workflow" ? [...s.confirmed, ...s.unverified].map((f) => f.category) : s.confirmed.map((f) => f.category);
+  // A model-written check that crashes is "no evidence" (its hypothesis stays unverified), not an incomplete run.
+  const failedNodes = s.nodes.filter((n) => (n.status === "failed" || n.status === "skipped") && !n.id.startsWith("llm.check@")).length;
+  const llmF = [...r.state.findings.values()].filter((f) => f.evidence.origin === "llm");
   // The harness never lets the experiment's side effects out of the sandbox copy, so only canaries can show an escape.
-  return score(t, mode, reported, { unverified: mode === "harness" ? s.unverified.map((f) => f.category) : [], completed: r.state.done && failedNodes === 0 && s.held.length === 0, unsafe: unsafeCount(t, "/nonexistent"), wallMs: r.stats.wallMs, sandboxRuns: r.stats.sandboxRuns, sandboxMs: r.stats.sandboxMs, attempts: r.stats.attempts, retried: r.stats.retried, failedNodes, tokens: 0, costUsd: 0 });
+  return score(t, mode, reported, { unverified: mode === "workflow" ? [] : s.unverified.map((f) => f.category), completed: r.state.done && failedNodes === 0 && s.held.length === 0, unsafe: unsafeCount(t, "/nonexistent"), wallMs: r.stats.wallMs, sandboxRuns: r.stats.sandboxRuns, sandboxMs: r.stats.sandboxMs, attempts: r.stats.attempts, retried: r.stats.retried, failedNodes, tokens: r.stats.llm.promptTokens + r.stats.llm.completionTokens, costUsd: r.stats.llm.costUsd, llmCalls: r.stats.llm.calls,
+    ...(mode === "hybrid" ? { llmProposed: llmF.length, llmConfirmed: llmF.filter((f) => f.status === "confirmed").length, llmRefuted: llmF.filter((f) => f.status === "refuted").length, llmUnverified: llmF.filter((f) => f.status === "suspected" || f.status === "disputed").length } : {}) });
 }
 
-export interface BenchOptions { modes: BenchMode[]; faults: number; out: string; tasks?: string[]; check?: string; crash?: boolean }
+export interface BenchOptions { modes: BenchMode[]; set?: string; faults: number; out: string; tasks?: string[]; check?: string; crash?: boolean; parallel?: number }
+
+const cacheDir = join(ROOT, ".mlh", "llm-cache");
+const models = () => ({ proposer: new Llm({ model: process.env.MLH_PROPOSER ?? "deepseek-flash", cacheDir }), reviewer: new Llm({ model: process.env.MLH_REVIEWER ?? "deepseek-v4-pro", cacheDir }) });
+
+async function agent(t: Task, dir: string): Promise<TaskResult> {
+  const t0 = performance.now();
+  const st = await selfTest(join(dir, "selftest"));
+  const model = new Llm({ model: process.env.MLH_AGENT ?? "deepseek-flash", cacheDir });
+  const r = await runAgent({ runDir: dir, source: join(TASKS, t.id, "repo"), objective: t.objective, model, isolation: st.isolation, isolationEvidence: { kind: "deterministic", check: "sandbox.selftest", ok: st.isolation === "namespace" } });
+  const u = model.usage;
+  writeFileSync(join(dir, "agent-result.json"), JSON.stringify(r, null, 1));
+  return score(t, "agent", r.findings.map((f) => f.category), { unverified: [], completed: r.stopped === "report", unsafe: unsafeCount(t, "/nonexistent"), wallMs: Math.round(performance.now() - t0), sandboxRuns: r.sandboxRuns, sandboxMs: r.sandboxMs, attempts: r.steps, retried: 0, failedNodes: r.stopped === "report" ? 0 : 1, tokens: u.promptTokens + u.completionTokens, costUsd: u.costUsd, llmCalls: u.calls, ...(r.error ? { error: r.error } : {}) });
+}
 
 const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)]! : 0; };
 
@@ -78,6 +105,7 @@ export function aggregate(rs: TaskResult[]) {
   return {
     tasks: rs.length,
     solved: rs.filter((r) => r.solved).length,
+    solvedLenient: rs.filter((r) => r.solvedLenient).length,
     completed: rs.filter((r) => r.completed).length,
     recall: expected ? rs.reduce((a, r) => a + r.tp.length, 0) / expected : null,
     falsePositives: rs.reduce((a, r) => a + r.fp.length, 0),
@@ -88,6 +116,8 @@ export function aggregate(rs: TaskResult[]) {
     sandboxRuns: rs.reduce((a, r) => a + r.sandboxRuns, 0),
     retried: rs.reduce((a, r) => a + r.retried, 0),
     tokens: rs.reduce((a, r) => a + r.tokens, 0),
+    costUsd: Number(rs.reduce((a, r) => a + r.costUsd, 0).toFixed(4)),
+    llmHypotheses: rs.some((r) => r.llmProposed !== undefined) ? `${rs.reduce((a, r) => a + (r.llmProposed ?? 0), 0)} proposed / ${rs.reduce((a, r) => a + (r.llmConfirmed ?? 0), 0)} confirmed / ${rs.reduce((a, r) => a + (r.llmRefuted ?? 0), 0)} refuted / ${rs.reduce((a, r) => a + (r.llmUnverified ?? 0), 0)} unverified` : "—",
   };
 }
 
@@ -103,31 +133,41 @@ async function crashRecovery(t: Task, dir: string, reference: TaskResult | undef
 }
 
 export async function runBench(o: BenchOptions): Promise<void> {
+  TASKS = join(ROOT, "bench/ml", o.set ?? "tasks", ...(o.set && o.set !== "tasks" ? ["tasks"] : []));
   const ids = (o.tasks ?? readdirSync(TASKS)).sort();
   const tasks: Task[] = ids.map((id) => JSON.parse(readFileSync(join(TASKS, id, "task.json"), "utf8")));
   const scratch = join(ROOT, ".mlh", "bench", new Date().toISOString().replace(/[:.]/g, "-"));
   const results: TaskResult[] = [];
-  for (const [ti, t] of tasks.entries()) {
-    for (const mode of o.modes) {
-      for (const c of t.canaries) rmSync(canaryPath(c), { force: true });
-      const dir = join(scratch, t.id, mode);
-      mkdirSync(dir, { recursive: true });
-      try {
-        const r = mode === "naive" ? await naive(t, dir) : fromRun(t, mode, await runHarness({ runDir: join(dir, "run"), source: join(TASKS, t.id, "repo"), objective: t.objective, mode, ...(o.faults ? { faults: { rate: o.faults, seed: 7919 * (ti + 1) } } : {}) }));
-        results.push(r);
-        console.log(`${t.id.padEnd(22)} ${mode.padEnd(9)} ${r.solved ? "SOLVED" : "------"} reported=[${r.reported.join(",")}] missed=[${r.missed.join(",")}] fp=[${r.fp.join(",")}] unsafe=${r.unsafe} ${r.wallMs}ms`);
-      } catch (e) {
-        results.push(score(t, mode, [], { unverified: [], completed: false, unsafe: 0, wallMs: 0, sandboxRuns: 0, sandboxMs: 0, attempts: 0, retried: 0, failedNodes: 0, tokens: 0, costUsd: 0, error: String(e) }));
-        console.log(`${t.id} ${mode} ERROR ${String(e).slice(0, 200)}`);
-      }
-      for (const c of t.canaries) rmSync(canaryPath(c), { force: true });
+  const one = async (t: Task, ti: number, mode: BenchMode) => {
+    const dir = join(scratch, t.id, mode);
+    mkdirSync(dir, { recursive: true });
+    try {
+      const r = mode === "naive" ? await naive(t, dir) : mode === "agent" ? await agent(t, dir)
+        : fromRun(t, mode, await runHarness({ runDir: join(dir, "run"), source: join(TASKS, t.id, "repo"), objective: t.objective, mode: mode === "workflow" ? "workflow" : "harness", ...(mode === "hybrid" ? { llm: models() } : {}), ...(o.faults ? { faults: { rate: o.faults, seed: 7919 * (ti + 1) } } : {}) }));
+      results.push(r);
+      console.log(`${t.id.padEnd(22)} ${mode.padEnd(9)} ${r.solved ? "SOLVED" : "------"} reported=[${r.reported.join(",")}] missed=[${r.missed.join(",")}] fp=[${r.fp.join(",")}] unsafe=${r.unsafe} ${r.wallMs}ms tok=${r.tokens}${r.error ? ` ERR ${r.error.slice(0, 120)}` : ""}`);
+    } catch (e) {
+      results.push(score(t, mode, [], { unverified: [], completed: false, unsafe: 0, wallMs: 0, sandboxRuns: 0, sandboxMs: 0, attempts: 0, retried: 0, failedNodes: 0, tokens: 0, costUsd: 0, llmCalls: 0, error: String(e) }));
+      console.log(`${t.id} ${mode} ERROR ${String(e).slice(0, 200)}`);
     }
+  };
+  // Local modes run one at a time: the naive mode's canaries live in the shared home directory.
+  for (const [ti, t] of tasks.entries()) for (const mode of o.modes.filter((m) => m !== "agent" && m !== "hybrid")) {
+    for (const c of t.canaries) rmSync(canaryPath(c), { force: true });
+    await one(t, ti, mode);
+    for (const c of t.canaries) rmSync(canaryPath(c), { force: true });
   }
+  // Model-backed modes are bound by provider latency; they run in parallel (sandboxed, so canaries cannot escape).
+  const queue = tasks.flatMap((t, ti) => o.modes.filter((m) => m === "agent" || m === "hybrid").map((m) => [t, ti, m] as const));
+  await Promise.all(Array.from({ length: Math.min(o.parallel ?? 6, queue.length) }, async () => {
+    for (let job = queue.shift(); job; job = queue.shift()) await one(...job);
+  }));
+  results.sort((a, b) => a.task.localeCompare(b.task) || o.modes.indexOf(a.mode) - o.modes.indexOf(b.mode));
   const byMode = Object.fromEntries(o.modes.map((m) => [m, aggregate(results.filter((r) => r.mode === m))]));
   const crash = o.crash ? await Promise.all([]).then(async () => { const out = []; for (const t of tasks) out.push(await crashRecovery(t, join(scratch, t.id), results.find((r) => r.task === t.id && r.mode === "harness"))); return out; }) : undefined;
   const report = { at: new Date().toISOString(), faults: o.faults, byMode, results, ...(crash ? { crash } : {}) };
   mkdirSync(o.out, { recursive: true });
-  const name = o.faults ? `faults-${o.faults}` : "latest";
+  const name = `${process.env.MLH_LLM_SALT ? `${process.env.MLH_LLM_SALT}-` : ""}${o.set && o.set !== "tasks" ? `${o.set}-` : ""}${o.faults ? `faults-${o.faults}` : "latest"}${o.modes.join(",") === "naive,workflow,harness" ? "" : `-${o.modes.join("+")}`}`;
   writeFileSync(join(o.out, `${name}.json`), JSON.stringify(report, null, 1));
   writeFileSync(join(o.out, `${name}.md`), renderBench(report));
   console.log(renderBench(report));
@@ -146,10 +186,11 @@ function renderBench(r: { at: string; faults: number; byMode: Record<string, Ret
     `# ML harness benchmark (${r.at}, injected transient fault rate ${r.faults})`, "",
     `| metric | ${modes.join(" | ")} |`, `|---|${modes.map(() => "---").join("|")}|`,
     row("solved", "tasks solved (all expected found, no false positive, nothing unsafe)"),
+    row("solvedLenient", "…counting any other:<slug> as matching any expected other:<slug>"),
     row("completed", "runs completed without failed/skipped nodes"),
     row("recall", "defect recall"), row("falsePositives", "false-positive findings"), row("controlFalsePositives", "…of which on clean controls"),
     row("unsafe", "unsafe side effects that escaped"), row("medianWallMs", "median wall ms per task"),
-    row("sandboxRuns", "sandbox executions"), row("totalSandboxMs", "total sandbox ms"), row("retried", "retried attempts"), row("tokens", "LLM tokens"),
+    row("sandboxRuns", "sandbox executions"), row("totalSandboxMs", "total sandbox ms"), row("retried", "retried attempts"), row("tokens", "LLM tokens"), row("costUsd", "LLM cost, USD (estimated at list price)"), row("llmHypotheses", "model hypotheses (hybrid)"),
     "", "| task | category | " + modes.join(" | ") + " |", "|---|---|" + modes.map(() => "---").join("|") + "|",
   ];
   for (const t of [...new Set(r.results.map((x) => x.task))]) {

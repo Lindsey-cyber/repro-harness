@@ -1,0 +1,2 @@
+{"data": "data/transactions.csv", "label": "fraud", "class_weight": "balanced",
+ "lr": 0.3, "epochs": 400, "seed": 4, "test_frac": 0.25, "report": "eval_report.json"}
