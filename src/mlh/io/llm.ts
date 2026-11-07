@@ -30,7 +30,7 @@ function price(model: string): [number, number, number] {
   return PRICES[model] ?? [0, 0, 0];
 }
 
-export interface LlmOptions { model: string; apiKey?: string; baseUrl?: string; cacheDir?: string; timeoutMs?: number }
+export interface LlmOptions { model: string; apiKey?: string; baseUrl?: string; cacheDir?: string; timeoutMs?: number; fault?: () => boolean }
 
 export class Llm {
   readonly usage: Usage = zeroUsage();
@@ -39,8 +39,11 @@ export class Llm {
   private readonly base: string;
   private readonly cacheDir: string | undefined;
   private readonly timeoutMs: number;
+  // Injected provider outage (recovery experiments): the call fails as if every client retry was exhausted.
+  private readonly fault: () => boolean;
 
   constructor(o: LlmOptions) {
+    this.fault = o.fault ?? (() => false);
     this.model = o.model;
     this.key = o.apiKey ?? process.env.DEEPSEEK_API_KEY ?? "";
     this.base = o.baseUrl ?? process.env.MLH_LLM_BASE_URL ?? "https://api.deepseek.com";
@@ -53,6 +56,7 @@ export class Llm {
   }
 
   async chat(messages: ChatMsg[], opts: { tools?: ToolDef[]; maxTokens?: number; json?: boolean; effort?: "low" | "high" | "max"; salt?: string } = {}): Promise<{ message: Extract<ChatMsg, { role: "assistant" }>; usage: Usage }> {
+    if (this.fault()) throw new Error("LLM unavailable (injected outage)");
     const body: Record<string, unknown> = { model: this.model, messages, temperature: 0, max_tokens: opts.maxTokens ?? 4000 };
     if (opts.tools?.length) body.tools = opts.tools;
     if (opts.json) body.response_format = { type: "json_object" };
