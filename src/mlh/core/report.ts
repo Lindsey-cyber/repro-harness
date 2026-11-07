@@ -8,6 +8,7 @@ export interface Summary {
   mode: string;
   reproduced: "yes" | "no" | "unknown";
   confirmed: Finding[];
+  supported: Finding[]; // backed only by a model-written measurement the harness judged material
   unverified: Finding[]; // suspected or disputed: shown, never counted as confirmed
   refuted: Finding[];
   nodes: { id: string; status: string; attempts: number; reason?: string }[];
@@ -25,6 +26,7 @@ export function summarize(s: RunState): Summary {
     mode: s.mode,
     reproduced: claimFail ? "no" : claimNode?.status === "succeeded" ? (fs.some((f) => f.category === "repro.claim_not_met") ? "unknown" : "yes") : "unknown",
     confirmed: fs.filter((f) => f.status === "confirmed"),
+    supported: fs.filter((f) => f.status === "supported"),
     unverified: fs.filter((f) => f.status === "suspected" || f.status === "disputed"),
     refuted: fs.filter((f) => f.status === "refuted"),
     nodes: s.order.map((id) => {
@@ -40,7 +42,7 @@ const fmt = (v: unknown): string => (typeof v === "number" ? (Number.isInteger(v
 
 function findingBlock(f: Finding): string {
   const ev = Object.entries(f.evidence).map(([k, v]) => `  - ${k}: ${fmt(v)}`).join("\n");
-  const cs = f.confirmations.map((c) => `  - ${c.supports ? "supports" : "refutes"} (${c.node}): ${c.note}`).join("\n");
+  const cs = f.confirmations.map((c) => `  - ${c.inconclusive ? "inconclusive" : c.supports ? "supports" : "refutes"} [${c.tier ?? "deterministic"}] (${c.node}): ${c.note}`).join("\n");
   return `### [${f.severity}] ${f.category}: ${f.summary}\n- raised by \`${f.node}\` (${f.kind}), status **${f.status}**\n- evidence:\n${ev}${cs ? `\n- independent checks:\n${cs}` : ""}`;
 }
 
@@ -53,7 +55,7 @@ export function renderReport(s: RunState, manifest: Manifest | undefined, extra:
     `- source: ${m.source}`,
     `- mode: ${m.mode}`,
     `- claim reproduced: **${m.reproduced}**`,
-    `- confirmed findings: ${m.confirmed.length}; unverified: ${m.unverified.length}; refuted: ${m.refuted.length}`,
+    `- confirmed findings: ${m.confirmed.length}; supported by a measured effect: ${m.supported.length}; unverified: ${m.unverified.length}; refuted: ${m.refuted.length}`,
     ``,
     `## Manifest (what the harness believed about the repository)`,
     "```json",
@@ -62,6 +64,9 @@ export function renderReport(s: RunState, manifest: Manifest | undefined, extra:
     ``,
     `## Confirmed findings`,
     m.confirmed.length ? m.confirmed.map(findingBlock).join("\n\n") : "None.",
+    ``,
+    `## Supported by a measured effect (model-written measurement, harness-judged threshold)`,
+    m.supported.length ? m.supported.map(findingBlock).join("\n\n") : "None.",
     ``,
     `## Unverified suspicions (not counted as findings)`,
     m.unverified.length ? m.unverified.map(findingBlock).join("\n\n") : "None.",
@@ -99,6 +104,7 @@ export function compact(s: RunState, budgetChars = 4000): string {
     `source: ${m.source} (mode ${m.mode}, ${s.done ? "finished" : "in progress"})`,
     `held for approval: ${m.held.map((h) => `${h.id} (${h.reason})`).join("; ") || "none"}`,
     `confirmed: ${m.confirmed.map((f) => `${f.category}: ${f.summary}`).join(" | ") || "none"}`,
+    `supported (measured effect): ${m.supported.map((f) => f.category).join(", ") || "none"}`,
     `unverified: ${m.unverified.map((f) => `${f.category}`).join(", ") || "none"}`,
     `refuted: ${m.refuted.map((f) => `${f.category}`).join(", ") || "none"}`,
     `failed: ${m.nodes.filter((n) => n.status === "failed").map((n) => n.id).join(", ") || "none"}`,

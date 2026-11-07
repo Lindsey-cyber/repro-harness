@@ -6,7 +6,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileS
 import { join, resolve } from "node:path";
 import { authorize, type Action, type Evidence } from "./core/authz.ts";
 import { apply, blocked, depOf, ready, replay, settled, type RunEvent, type RunState, type TaskNode } from "./core/dag.ts";
-import { confirmations, expand, INSPECT, initialPlan } from "./core/planner.ts";
+import { AGENT, confirmations, expand, fallback, INSPECT, initialPlan } from "./core/planner.ts";
 import { compact, renderReport, summarize, type Summary } from "./core/report.ts";
 import { initialTrust, type SkillTrust } from "./core/trust.ts";
 import type { Manifest } from "./core/types.ts";
@@ -15,9 +15,11 @@ import { Journal } from "./io/journal.ts";
 import { runProc } from "./io/proc.ts";
 import { DEFAULT_LIMITS, Sandbox, selfTest, SkillError, type Isolation, type Limits, type SandboxStats } from "./io/sandbox.ts";
 import { addUsage, meter, zeroUsage, type Usage } from "./io/llm.ts";
-import { skill, SKILLS, type Models, type SkillCtx } from "./skills/index.ts";
+import type { Models, SkillCtx } from "./skills/index.ts";
+import { skill, SKILLS } from "./skills/registry.ts";
 
-export type Mode = "harness" | "workflow";
+// agentic: an exploring agent node leads; its findings are routed to independent confirmers.
+export type Mode = "harness" | "workflow" | "agentic";
 
 export interface RunOptions {
   runDir: string;
@@ -33,6 +35,7 @@ export interface RunOptions {
   // Models for the LLM skills. Passing them is the human's standing approval to
   // send repository content to that provider (the only evidence for model_query).
   llm?: Models;
+  crashAfterSteps?: number; // exit after this many agent steps in this process (recovery tests)
 }
 
 export interface RunResult {
@@ -83,7 +86,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const tracePath = join(runDir, "trace.jsonl");
   let events = journal.read();
   const mode: Mode = (events.find((e) => e.t === "run") as { mode?: Mode } | undefined)?.mode ?? o.mode ?? "harness";
-  const maxAttempts = mode === "harness" ? 3 : 1;
+  const maxAttempts = mode === "workflow" ? 1 : 3;
   const state = replay(events, maxAttempts);
   const emit = (e: RunEvent) => { journal.append(e); apply(state, e); };
 
@@ -104,16 +107,31 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const limits = o.limits ?? DEFAULT_LIMITS;
   const concurrency = o.concurrency ?? 3;
   let completedHere = 0, retried = 0, attemptsHere = 0, llmTotal = zeroUsage();
-  const specs = SKILLS.filter((s) => o.llm || !s.actions.includes("model_query"));
-  const manifest = (): Manifest => ((state.nodes.get(INSPECT)?.output as { manifest?: Manifest } | undefined)?.manifest ?? {});
+  const specs = SKILLS.filter((s) => (o.llm || !s.actions.includes("model_query")) && (mode === "agentic" || (s.id !== AGENT && !s.id.startsWith("verify."))) && (mode !== "agentic" || !s.id.startsWith("llm.")));
+  const detSpecs = specs.filter((s) => s.id !== AGENT);
+  // Explicit mlh.json > what the exploring agent validated > inference.
+  const manifest = (): Manifest => {
+    const ins = state.nodes.get(INSPECT)?.output as { manifest?: Manifest; provenance?: Record<string, string> } | undefined;
+    const ag = state.nodes.get(AGENT)?.status === "succeeded" ? (state.nodes.get(AGENT)!.output as { manifest?: Manifest }).manifest ?? {} : {};
+    const explicit = Object.fromEntries(Object.entries(ins?.manifest ?? {}).filter(([k]) => ins?.provenance?.[k] === "mlh.json"));
+    return { ...(ins?.manifest ?? {}), ...ag, ...explicit } as Manifest;
+  };
 
   const afterOk = (n: TaskNode, findings: number) => {
-    if (n.id === INSPECT) {
-      const x = expand(state.objective, manifest(), specs);
+    if (n.id === INSPECT && mode === "agentic") {
+      emit({ t: "node", at: now(), node: { id: AGENT, skill: AGENT, deps: [INSPECT], purpose: "detect", params: {} }, why: "the exploring agent leads" });
+    }
+    if ((n.id === INSPECT && mode !== "agentic") || n.id === AGENT) {
+      const x = expand(state.objective, manifest(), detSpecs);
       for (const node of x.nodes) emit({ t: "node", at: now(), node, why: "expanded from manifest" });
       for (const g of x.gaps) emit({ t: "gap", at: now(), skill: g.skill, reason: g.reason });
     }
-    if (mode !== "harness" || n.purpose === "confirm") return;
+    if (n.purpose === "confirm" && n.target) {
+      const c = state.nodes.get(n.id)!;
+      const last = state.findings.get(n.target)?.confirmations.find((x) => x.node === n.id);
+      if (c.status === "succeeded" && last?.inconclusive) for (const node of fallback(state, n.target, specs)) emit({ t: "node", at: now(), node, why: `${n.id} inconclusive` });
+    }
+    if (mode === "workflow" || n.purpose === "confirm") return;
     for (let i = 0; i < findings; i++) {
       const fid = `${n.id}/${i}`;
       for (const node of confirmations(state, fid, specs, manifest(), trust)) {
@@ -146,6 +164,12 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     const models = o.llm ? { proposer: meter(o.llm.proposer), reviewer: meter(o.llm.reviewer) } : undefined;
     const ctx: SkillCtx = {
       ...(models ? { llm: models } : {}),
+      workDir: () => join(runDir, "work", n.id.replace(/[^\w.-]+/g, "_")),
+      sourceDir: srcDir,
+      isolation: st.isolation,
+      isolationEvidence,
+      ...(o.faults ? { sandboxFault: (() => { let k = 0; return () => faultFor(o.faults!.rate, o.faults!.seed, `${n.id}#${attempt}#agent#${k++}`); })() } : {}),
+      ...(o.crashAfterSteps !== undefined ? { crashAfterSteps: o.crashAfterSteps } : {}),
       node: n, state, manifest: manifest(),
       target: n.target ? state.findings.get(n.target) : undefined,
       dep: (s) => {

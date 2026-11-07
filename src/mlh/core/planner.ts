@@ -36,6 +36,22 @@ export interface SkillSpec {
 }
 
 export const INSPECT = "repo.inspect";
+export const AGENT = "agent.explore";
+export const EFFECT = "verify.effect";
+
+// Where an exploring agent's finding is independently tested. Each confirmer
+// measures whether the claimed defect materially changes the result with harness
+// code; a category without one, or a confirmer that cannot decide, falls back to
+// the effect check (the agent's own measurement, rerun and judged by the harness).
+export const AGENT_ROUTES: Record<string, string> = {
+  "data.train_test_overlap": "verify.overlap",
+  "data.target_leak": "verify.leak",
+  "eval.metric_mismatch": "verify.metric",
+  "ckpt.roundtrip_mismatch": "verify.ckpt",
+  "repro.nondeterministic": "verify.nondeterminism",
+  "repro.claim_not_met": "verify.claim",
+  "pipeline.eval_path_mismatch": "verify.eval_path",
+};
 
 export function intentsOf(objective: string): Intent[] {
   const o = objective.toLowerCase();
@@ -93,6 +109,12 @@ export function confirmations(s: RunState, findingId: string, specs: SkillSpec[]
   const tag = findingId.replace(/[^\w.-]+/g, "_");
   const out: TaskNode[] = [];
   const origin = typeof f.evidence.origin === "string" ? f.evidence.origin : undefined;
+  if (origin === "agent") {
+    const route = AGENT_ROUTES[f.category];
+    const c = route ? spec(route) : undefined;
+    const id = c && c.needs(manifest) === null ? c.id : EFFECT;
+    return spec(id) ? [{ id: `${id}@${tag}`, skill: id, deps: [INSPECT, detector.id], purpose: "confirm", params: {}, target: findingId }] : [];
+  }
   if (origin) {
     return specs.filter((x) => x.confirmsOrigin === origin && x.needs(manifest) === null)
       .map((c) => ({ id: `${c.id}@${tag}`, skill: c.id, deps: [INSPECT, detector.id], purpose: "confirm" as const, params: {}, target: findingId }));
@@ -118,3 +140,12 @@ export function confirmations(s: RunState, findingId: string, specs: SkillSpec[]
 }
 
 const findNode = (s: RunState, skill: string): string | undefined => s.order.find((id) => s.nodes.get(id)!.node.skill === skill && s.nodes.get(id)!.node.purpose !== "confirm");
+
+// After a confirmer could not decide on an agent's finding: the effect check, once.
+export function fallback(s: RunState, findingId: string, specs: SkillSpec[]): TaskNode[] {
+  const f = s.findings.get(findingId);
+  if (!f || f.evidence.origin !== "agent" || !specs.some((x) => x.id === EFFECT)) return [];
+  const id = `${EFFECT}@${findingId.replace(/[^\w.-]+/g, "_")}`;
+  if (s.nodes.has(id)) return [];
+  return [{ id, skill: EFFECT, deps: [INSPECT, f.node], purpose: "confirm", params: {}, target: findingId }];
+}

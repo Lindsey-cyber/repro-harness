@@ -10,7 +10,8 @@ import type { NodeState, RunState, TaskNode } from "../core/dag.ts";
 import type { SkillSpec } from "../core/planner.ts";
 import type { ArtifactRef, Finding, FindingDraft, Manifest } from "../core/types.ts";
 import type { Llm } from "../io/llm.ts";
-import { SkillError, type Sandbox } from "../io/sandbox.ts";
+import { SkillError, type Isolation, type Sandbox } from "../io/sandbox.ts";
+import type { Evidence } from "../core/authz.ts";
 import { VOCABULARY } from "../core/vocab.ts";
 import { digest, validateManifest } from "./repo.ts";
 
@@ -28,12 +29,19 @@ export interface SkillCtx {
   load(ref: ArtifactRef): string;
   // Present only when the human enabled model use for this run (--llm).
   llm?: Models;
+  // A persistent directory for this node, kept across attempts and resumes.
+  workDir(): string;
+  sourceDir: string;
+  isolation: Isolation;
+  isolationEvidence: Evidence;
+  sandboxFault?: () => boolean;
+  crashAfterSteps?: number;
 }
 
 export interface SkillOutcome {
   output: unknown;
   findings?: FindingDraft[];
-  confirmation?: { supports: boolean; note: string };
+  confirmation?: { supports: boolean; note: string; inconclusive?: boolean; tier?: "deterministic" | "measured" };
   // The skill ran but could not check what it is for (e.g. no predictions file): reported as a coverage gap.
   gap?: string;
 }
@@ -58,10 +66,10 @@ export const T = {
   entityShare: 0.01, // share of test rows whose entity also appears in train
 };
 
-const num = z.number();
+export const num = z.number();
 const metricsSchema = z.record(z.string(), z.unknown());
-const hasCmd = (c: string[] | undefined, what: string) => (c?.length ? null : `no ${what} command`);
-const first = (...rs: (string | null)[]) => rs.find((r) => r !== null) ?? null;
+export const hasCmd = (c: string[] | undefined, what: string) => (c?.length ? null : `no ${what} command`);
+export const first = (...rs: (string | null)[]) => rs.find((r) => r !== null) ?? null;
 
 // Metric files may nest ({"test": {"auc": 0.8}}); keys are flattened with dots.
 export function flatten(o: unknown, prefix = "", out: Record<string, unknown> = {}): Record<string, unknown> {
@@ -76,15 +84,15 @@ const pickNum = (metrics: Record<string, unknown>, keys: (string | undefined)[])
 // Common spellings of a metric in result files.
 const ALIASES: Record<string, string[]> = { accuracy: ["accuracy", "acc"], f1: ["f1", "f1_score"], auc: ["auc", "roc_auc", "auroc"] };
 const names = (m: Manifest) => ALIASES[m.metric!] ?? [m.metric!];
-function metricValue(metrics: Record<string, unknown>, m: Manifest): number | undefined {
+export function metricValue(metrics: Record<string, unknown>, m: Manifest): number | undefined {
   return pickNum(metrics, [m.metricKey, ...names(m).flatMap((n) => [n, `test_${n}`, `test.${n}`, `${n}_test`, `test/${n}`, `metrics.${n}`])]);
 }
-function trainMetricValue(metrics: Record<string, unknown>, m: Manifest): number | undefined {
+export function trainMetricValue(metrics: Record<string, unknown>, m: Manifest): number | undefined {
   return pickNum(metrics, [m.trainMetricKey, ...names(m).flatMap((n) => [`train_${n}`, `${n}_train`, `train.${n}`, `train/${n}`])]);
 }
 
 type Snapshot = Map<string, string>;
-function snapshot(root: string): Snapshot {
+export function snapshot(root: string): Snapshot {
   const out: Snapshot = new Map();
   const walk = (d: string) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
@@ -96,14 +104,14 @@ function snapshot(root: string): Snapshot {
   walk(root);
   return out;
 }
-const changed = (before: Snapshot, after: Snapshot) => [...after.entries()].filter(([k, v]) => before.get(k) !== v).map(([k]) => k);
+export const changed = (before: Snapshot, after: Snapshot) => [...after.entries()].filter(([k, v]) => before.get(k) !== v).map(([k]) => k);
 
 export interface Resolved { metrics: string; predictions?: string; checkpoint?: string; by: Record<string, string> }
 
 // The manifest's output paths are a belief; what the run wrote is a fact. A
 // declared path that does not exist after the run is replaced by the unique
 // file of that kind the run actually produced.
-function resolveOutputs(sb: Sandbox, m: Manifest, files: string[]): { resolved: Partial<Resolved>; by: Record<string, string> } {
+export function resolveOutputs(sb: Sandbox, m: Manifest, files: string[]): { resolved: Partial<Resolved>; by: Record<string, string> } {
   const by: Record<string, string> = {};
   const res: Partial<Resolved> = {};
   const o = m.outputs ?? {};
@@ -133,13 +141,13 @@ function trainCommand(m: Manifest, seed: number): { cmd: string[]; env: Record<s
   }
   return { cmd, env };
 }
-const seedControllable = (m: Manifest) => !!(m.seedEnv || m.seedArg);
+export const seedControllable = (m: Manifest) => !!(m.seedEnv || m.seedArg);
 
-async function runTrain(ctx: SkillCtx, sb: Sandbox, seed: number): Promise<{ metrics: Record<string, unknown>; ms: number; resolved: Partial<Resolved>; by: Record<string, string> }> {
+export async function runTrain(ctx: SkillCtx, sb: Sandbox, seed: number, extraEnv: Record<string, string> = {}): Promise<{ metrics: Record<string, unknown>; ms: number; resolved: Partial<Resolved>; by: Record<string, string> }> {
   const m = ctx.manifest;
   const before = snapshot(sb.dir);
   const { cmd, env } = trainCommand(m, seed);
-  const r = await sb.run(cmd, env);
+  const r = await sb.run(cmd, { ...env, ...extraEnv });
   if (r.category) throw new SkillError(r.category, `train exited ${r.code ?? r.signal}: ${r.stderr.slice(-600)}`);
   const { resolved, by } = resolveOutputs(sb, m, changed(before, snapshot(sb.dir)));
   if (!resolved.metrics) throw new SkillError("experiment_error", `train wrote no readable metrics: ${by.metrics}`);
@@ -147,7 +155,7 @@ async function runTrain(ctx: SkillCtx, sb: Sandbox, seed: number): Promise<{ met
   return { metrics, ms: r.ms, resolved, by };
 }
 
-function stage(sb: Sandbox, from: string, rel: string): string {
+export function stage(sb: Sandbox, from: string, rel: string): string {
   const dest = sb.path(rel);
   mkdirSync(dirname(dest), { recursive: true });
   copyFileSync(from, dest);
@@ -155,7 +163,7 @@ function stage(sb: Sandbox, from: string, rel: string): string {
 }
 
 const trainOut = z.object({ metrics: metricsSchema, seed: num, ms: num, resolved: z.record(z.string(), z.unknown()), by: z.record(z.string(), z.string()) });
-type TrainOut = z.infer<typeof trainOut>;
+export type TrainOut = z.infer<typeof trainOut>;
 
 const inspect: Skill = {
   id: "repo.inspect", version: "1.0.0", purpose: "setup", intents: ["reproduce", "audit"], actions: ["read_workspace", "exec_sandboxed"], after: [],
@@ -208,7 +216,7 @@ const train: Skill = {
   },
 };
 
-const predictionsOf = (ctx: SkillCtx, n: NodeState): string | undefined => {
+export const predictionsOf = (ctx: SkillCtx, n: NodeState): string | undefined => {
   const ref = n.artifacts.find((a) => a.name === "predictions");
   return ref ? ctx.load(ref) : undefined;
 };
@@ -401,7 +409,8 @@ const rerun: Skill = {
   async run(ctx) {
     const t = ctx.dep("run.train"), a = (t.output as TrainOut);
     const sb = ctx.sandbox();
-    const { metrics, resolved } = await runTrain(ctx, sb, a.seed);
+    // Same command and seed, but a different hash seed: results must not depend on Python's hash order.
+    const { metrics, resolved } = await runTrain(ctx, sb, a.seed, { PYTHONHASHSEED: "1" });
     const pred = resolved.predictions;
     const predSame = pred ? ctx.save("predictions", sb.path(pred)).sha256 === t.artifacts.find((x) => x.name === "predictions")?.sha256 : true;
     sb.remove();
@@ -486,7 +495,7 @@ const llmCheck: Skill = {
     const review = await ctx.llm.reviewer.json<{ valid?: boolean; reason?: string }>(REVIEW_PROMPT, `Claimed defect [${f.category}]: ${f.summary}\n\nCheck script:\n${String(f.evidence.check).slice(0, 8000)}\n\nCheck output (last line is the verdict):\n${r.stdout.slice(-3000)}\n${r.stderr.slice(-1000)}`, 16000);
     const valid = review.valid === true;
     const supports = executed.supports === true && valid;
-    return { output: { executed, valid, reviewer: ctx.llm.reviewer.model }, confirmation: { supports, note: `check printed supports=${String(executed.supports)} (${JSON.stringify(executed.observed ?? {}).slice(0, 300)}); ${ctx.llm.reviewer.model} review: ${valid ? "valid" : "invalid"}: ${String(review.reason ?? "").slice(0, 300)}` } };
+    return { output: { executed, valid, reviewer: ctx.llm.reviewer.model }, confirmation: { tier: "measured", supports, note: `check printed supports=${String(executed.supports)} (${JSON.stringify(executed.observed ?? {}).slice(0, 300)}); ${ctx.llm.reviewer.model} review: ${valid ? "valid" : "invalid"}: ${String(review.reason ?? "").slice(0, 300)}` } };
   },
 };
 
@@ -495,10 +504,5 @@ ${VOCABULARY}`;
 
 const REVIEW_PROMPT = `You are an independent, skeptical reviewer. Another model claimed a defect in an ML experiment and wrote a check script; it was executed and its output is shown. Decide whether (1) the check actually tests the claimed defect (not something else, not a restatement of the code's own numbers), (2) the check would come out differently on a correct implementation, and (3) the output demonstrates that the defect changes results. Return JSON {"valid": true|false, "reason": "..."}; valid only if all three hold.`;
 
-export const SKILLS: Skill[] = [inspect, train, audit, leakConfirm, groupSplit, recompute, gap, splitSwap, claim, seeds, rerun, roundtrip, hypothesize, llmCheck];
+export const BASE_SKILLS: Skill[] = [inspect, train, audit, leakConfirm, groupSplit, recompute, gap, splitSwap, claim, seeds, rerun, roundtrip, hypothesize, llmCheck];
 
-export function skill(id: string): Skill {
-  const s = SKILLS.find((x) => x.id === id);
-  if (!s) throw new Error(`unknown skill ${id}`);
-  return s;
-}

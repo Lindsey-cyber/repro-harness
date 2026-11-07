@@ -4,7 +4,7 @@ import { apply, blocked, emptyState, ready, replay, type RunEvent, type TaskNode
 import { confirmations, expand, intentsOf } from "../src/mlh/core/planner.ts";
 import { compact } from "../src/mlh/core/report.ts";
 import { initialTrust, promotable, promote, recordAudit, PROMOTION_STREAK } from "../src/mlh/core/trust.ts";
-import { SKILLS } from "../src/mlh/skills/index.ts";
+import { SKILLS } from "../src/mlh/skills/registry.ts";
 
 const at = "2026-11-07T00:00:00Z";
 const node = (id: string, deps: string[] = [], extra: Partial<TaskNode> = {}): RunEvent => ({ t: "node", at, node: { id, skill: id, deps, purpose: "detect", params: {}, ...extra }, why: "test" });

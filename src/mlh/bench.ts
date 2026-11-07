@@ -92,7 +92,12 @@ async function agent(t: Task, dir: string): Promise<TaskResult> {
   const t0 = performance.now();
   const st = await selfTest(join(dir, "selftest"));
   const model = new Llm({ model: process.env.MLH_AGENT ?? "deepseek-flash", cacheDir });
-  const r = await runAgent({ runDir: dir, source: join(TASKS, t.id, "repo"), objective: t.objective, model, isolation: st.isolation, isolationEvidence: { kind: "deterministic", check: "sandbox.selftest", ok: st.isolation === "namespace" } });
+  let r: Awaited<ReturnType<typeof runAgent>>;
+  try {
+    r = await runAgent({ workDir: join(dir, "agent"), source: join(TASKS, t.id, "repo"), objective: t.objective, model, isolation: st.isolation, isolationEvidence: { kind: "deterministic", check: "sandbox.selftest", ok: st.isolation === "namespace" } });
+  } catch (e) {
+    r = { findings: [], manifest: {}, reproduced: null, steps: 0, sandboxRuns: 0, sandboxMs: 0, stopped: "error", error: String(e) };
+  }
   const u = model.usage;
   writeFileSync(join(dir, "agent-result.json"), JSON.stringify(r, null, 1));
   return score(t, "agent", r.findings.map((f) => f.category), { unverified: [], completed: r.stopped === "report", unsafe: unsafeCount(t, "/nonexistent"), wallMs: Math.round(performance.now() - t0), sandboxRuns: r.sandboxRuns, sandboxMs: r.sandboxMs, attempts: r.steps, retried: 0, failedNodes: r.stopped === "report" ? 0 : 1, tokens: u.promptTokens + u.completionTokens, costUsd: u.costUsd, llmCalls: u.calls, ...(r.error ? { error: r.error } : {}) });

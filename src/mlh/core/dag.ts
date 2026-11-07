@@ -103,7 +103,8 @@ export function apply(s: RunState, e: RunEvent): RunState {
       if (e.confirmation) {
         const f = s.findings.get(e.confirmation.target);
         if (f) {
-          f.confirmations.push({ node: e.id, supports: e.confirmation.supports, note: e.confirmation.note });
+          const { target: _t, ...c } = e.confirmation;
+          f.confirmations.push({ node: e.id, ...c });
           if (f.kind === "suspicion") f.status = resolve(f.confirmations);
         }
       }
@@ -148,8 +149,16 @@ export function replay(events: RunEvent[], maxAttempts = 3): RunState {
 }
 
 export function resolve(cs: Confirmation[]): Finding["status"] {
-  const yes = cs.some((c) => c.supports), no = cs.some((c) => !c.supports);
-  return yes && no ? "disputed" : yes ? "confirmed" : no ? "refuted" : "suspected";
+  const decisive = cs.filter((c) => !c.inconclusive);
+  const det = decisive.filter((c) => (c.tier ?? "deterministic") === "deterministic");
+  const yes = det.some((c) => c.supports), no = det.some((c) => !c.supports);
+  if (yes && no) return "disputed";
+  if (yes) return "confirmed";
+  if (no) return "refuted";
+  const m = decisive.filter((c) => c.tier === "measured");
+  if (m.some((c) => !c.supports)) return "refuted";
+  if (m.some((c) => c.supports)) return "supported";
+  return "suspected";
 }
 
 export function ready(s: RunState): TaskNode[] {

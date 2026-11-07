@@ -41,12 +41,18 @@ export interface FindingDraft {
   kind: "fact" | "suspicion";
 }
 
-export type FindingStatus = "confirmed" | "suspected" | "refuted" | "disputed";
+// confirmed: an independent deterministic measurement supports it.
+// supported: only a reproducible, harness-judged effect measurement written by a model supports it.
+export type FindingStatus = "confirmed" | "supported" | "suspected" | "refuted" | "disputed";
 
 export interface Confirmation {
   node: string;
   supports: boolean;
   note: string;
+  // deterministic: measured by harness code. measured: an effect the harness judged from a model-written measurement.
+  tier?: "deterministic" | "measured";
+  // The check could not decide either way (e.g. a perfect-separability test on a leak that is not a single feature).
+  inconclusive?: boolean;
 }
 
 export interface Finding extends FindingDraft {

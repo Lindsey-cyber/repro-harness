@@ -40,7 +40,11 @@ export function validateManifest(root: string, m: Manifest): { accepted: Partial
     if (c === undefined) return;
     if (!Array.isArray(c) || !c.length || !c.every((x) => typeof x === "string")) { rejected[k] = "not a list of strings"; return; }
     const argv = c[0] === "python" ? ["python3", ...c.slice(1)] : c;
-    if (argv[0] !== "python3") { rejected[k] = `only python3 commands are run, got ${argv[0]}`; return; }
+    if (argv[0] === "make") {
+      if (!existsSync(join(root, "Makefile")) && !existsSync(join(root, "makefile"))) { rejected[k] = "make without a Makefile"; return; }
+      accepted[k] = argv; why[k] = "Makefile exists"; return;
+    }
+    if (!["python3", "bash", "sh"].includes(argv[0]!)) { rejected[k] = `only python3, bash, sh or make commands are run, got ${argv[0]}`; return; }
     const script = argv[1] === "-m" ? join(...(argv[2] ?? "").split(".")) + ".py" : argv[1];
     if (!inside(root, script) || !existsSync(join(root, script))) { rejected[k] = `script ${script} does not exist`; return; }
     accepted[k] = argv; why[k] = `${script} exists`;
@@ -61,7 +65,7 @@ export function validateManifest(root: string, m: Manifest): { accepted: Partial
     if (Object.keys(o).length) { accepted.outputs = o; why.outputs = "relative paths inside the repository; checked when the experiment runs"; }
   }
   if (m.metric !== undefined) { if (["accuracy", "f1", "auc"].includes(m.metric)) { accepted.metric = m.metric; why.metric = "supported metric"; } else rejected.metric = `unsupported metric ${m.metric}`; }
-  for (const k of ["metricKey", "trainMetricKey", "seedEnv"] as const) if (typeof m[k] === "string") { accepted[k] = m[k]; why[k] = "string; checked when the experiment runs"; }
+  for (const k of ["metricKey", "trainMetricKey", "seedEnv", "seedArg"] as const) if (typeof m[k] === "string") { accepted[k] = m[k]; why[k] = "string; checked when the experiment runs"; }
   if (m.claim) {
     let v = Number(m.claim.value);
     if (v > 1 && v <= 100) v /= 100;

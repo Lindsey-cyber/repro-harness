@@ -39,8 +39,10 @@ describe("LLM protocol", () => {
 
   it("confirms a model hypothesis only when its executed check supports it and a different model judges it valid", async () => {
     const yes = await runHarness({ runDir: tmp(), source: join(ROOT, "bench/ml/tasks/clean/repo"), objective: "check for errors", llm: { proposer, reviewer: scripted("fake-reviewer", () => ({ valid: true, reason: "sound" })) } });
-    expect(yes.summary.confirmed.map((f) => f.category)).toEqual(["other:label_noise"]);
-    expect(yes.summary.confirmed[0]!.confirmations[0]!.note).toMatch(/fake-reviewer review: valid/);
+    // A model-written check is a measurement, not harness evidence: at most "supported", never "confirmed".
+    expect(yes.summary.confirmed).toEqual([]);
+    expect(yes.summary.supported.map((f) => f.category)).toEqual(["other:label_noise"]);
+    expect(yes.summary.supported[0]!.confirmations[0]!.note).toMatch(/fake-reviewer review: valid/);
     expect(yes.stats.llm.calls).toBeGreaterThan(0);
 
     const no = await runHarness({ runDir: tmp(), source: join(ROOT, "bench/ml/tasks/clean/repo"), objective: "check for errors", llm: { proposer, reviewer: scripted("fake-reviewer", () => ({ valid: false, reason: "tests nothing" })) } });

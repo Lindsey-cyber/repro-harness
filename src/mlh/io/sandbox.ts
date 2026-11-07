@@ -75,6 +75,11 @@ export class Sandbox {
     return new Sandbox(dir, o.isolation, o.limits, o.stats, o.fault ?? (() => false));
   }
 
+  // A sandbox over an existing directory (a persistent agent workspace); nothing is copied or removed.
+  static attach(dir: string, o: { isolation: Isolation; limits: Limits; stats: SandboxStats; fault?: () => boolean }): Sandbox {
+    return new Sandbox(dir, o.isolation, o.limits, o.stats, o.fault ?? (() => false));
+  }
+
   private wrap(cmd: string[]): string[] {
     const l = this.limits;
     const lim = ["prlimit", `--cpu=${l.cpuSec}`, `--as=${l.memMB * 1024 * 1024}`, `--fsize=${l.fileMB * 1024 * 1024}`, "--nofile=512", "--"];

@@ -218,6 +218,18 @@ def cmd_swap(train, test, label, seed, group=None):
     print(json.dumps({"train_rows": len(keep), "holdout_rows": len(held), "seed": int(seed), "group": group}))
 
 
+def cmd_dedupe(train, test, label):
+    """Remove from train every row whose features also appear in test (exact match)."""
+    cols, rtr, _ = load_csv(train, label)
+    _, rte, _ = load_csv(test, label)
+    key = lambda r: "\x1f".join(str(as_float(r[c]) if as_float(r[c]) is not None else r[c]) for c in cols)
+    seen = {key(r) for r in rte}
+    keep = [r for r in rtr if key(r) not in seen]
+    with open(train, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rtr[0].keys())); w.writeheader(); w.writerows(keep)
+    print(json.dumps({"train_rows_before": len(rtr), "train_rows_after": len(keep)}))
+
+
 if __name__ == "__main__":
-    cmds = {"inspect": cmd_inspect, "audit": cmd_audit, "recompute": cmd_recompute, "bootstrap": cmd_bootstrap, "swap": cmd_swap}
+    cmds = {"inspect": cmd_inspect, "audit": cmd_audit, "recompute": cmd_recompute, "bootstrap": cmd_bootstrap, "swap": cmd_swap, "dedupe": cmd_dedupe}
     cmds[sys.argv[1]](*sys.argv[2:])

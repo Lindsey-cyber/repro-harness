@@ -7,7 +7,7 @@ import { compact } from "./core/report.ts";
 import { Journal } from "./io/journal.ts";
 import { runHarness, type Mode } from "./orchestrator.ts";
 import { Llm } from "./io/llm.ts";
-import { SKILLS } from "./skills/index.ts";
+import { SKILLS } from "./skills/registry.ts";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (name: string): string | undefined => { const i = rest.indexOf(`--${name}`); return i >= 0 ? rest[i + 1] : undefined; };
