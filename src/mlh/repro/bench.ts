@@ -107,8 +107,8 @@ async function team(t: Task, src: string, dir: string, o: RunOpts): Promise<Resu
   const fault = providerFault(o.providerFaults, o.seed);
   const mk = (model: string) => new Llm({ model, cacheDir, ...(fault ? { fault } : {}) });
   const llm = { proposer: mk(process.env.MLH_PROPOSER ?? "deepseek-flash"), reviewer: mk(process.env.MLH_REVIEWER ?? "deepseek-v4-pro") };
-  let crashed = false;
-  if (o.crashAfterSteps) {
+  let crashed = existsSync(join(runDir, "journal.jsonl")); // an earlier process died mid-run; this one resumes it
+  if (o.crashAfterSteps && !crashed) {
     // Killed mid-run in a child process, then resumed here.
     const child = await runProc(["npx", "tsx", join(ROOT, "src/mlh/cli.ts"), "repro", src, "--arxiv", t.paper.arxiv, "--objective", t.objective, "--llm", "--run-dir", runDir, "--approve", o.approve, "--crash-after-steps", String(o.crashAfterSteps)], { cwd: ROOT, env: process.env as Record<string, string>, timeoutMs: 3_600_000 });
     crashed = child.code === 137;
@@ -211,7 +211,8 @@ export async function runReproBench(o: { modes: Mode[]; tasks?: string[]; out: s
   const ids = (o.tasks ?? readdirSync(TASKS).filter((d) => existsSync(join(TASKS, d, "task.json")))).sort();
   const tasks: Task[] = ids.map((id) => JSON.parse(readFileSync(join(TASKS, id, "task.json"), "utf8")));
   const st = await selfTest(join(CACHE, "selftest"));
-  const scratch = join(CACHE, "runs", `${o.label ?? "run"}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+  // Stable per label: an interrupted team run is resumed from its journal on restart.
+  const scratch = join(CACHE, "runs", o.label ?? "run");
   // Results are appended as they finish, so an interrupted benchmark resumes where it stopped.
   mkdirSync(o.out, { recursive: true });
   const name = `repro-${o.label ?? "latest"}`;
