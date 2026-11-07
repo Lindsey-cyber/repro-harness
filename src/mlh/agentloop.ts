@@ -97,9 +97,12 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     let reported: Record<string, unknown> | null = null;
     for (const call of msg.tool_calls ?? []) {
       let args: Record<string, unknown> = {};
-      try { args = JSON.parse(call.function.arguments || "{}"); } catch { /* reported below */ }
+      let badArgs = false;
+      try { args = JSON.parse(call.function.arguments || "{}"); } catch { badArgs = true; }
       let out: string;
       try {
+        // Malformed arguments are returned to the agent to resend, never read as an empty report.
+        if (badArgs) throw new Error(`the arguments of ${call.function.name} are not valid JSON (${call.function.arguments.length} chars); resend them, keeping them shorter`);
         const name = call.function.name as ToolName | "report";
         if (name !== "report" && !o.role.tools.includes(name)) throw new Error(`tool ${name} is not available to the ${o.role.name} role`);
         switch (name) {

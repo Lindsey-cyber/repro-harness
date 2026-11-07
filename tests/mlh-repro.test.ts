@@ -21,6 +21,8 @@ describe("reproduction: deciding code", () => {
     expect(v.errors.join()).toMatch(/pub: parse must be a regex with exactly one capture group/);
     expect(validatePlan([claim], { runs: [{ claim: "cora", argv: ["a"], parse: "(x)", env: { PATH: "/evil", DATASET: "cora" }, cwd: "../up" }] }).specs[0]).toMatchObject({ env: { DATASET: "cora" } });
     expect(validatePlan([claim], { runs: [{ claim: "cora", argv: ["a"], parse: "(x)", cwd: "../up" }] }).specs[0]!.cwd).toBeUndefined();
+    // Inline programs would smuggle code changes past patch review.
+    expect(validatePlan([claim], { runs: [{ claim: "cora", argv: ["python3", "-c", "import time; time.clock=time.perf_counter; import train"], parse: "(x)" }] }).errors.join()).toMatch(/inline programs/);
   });
 
   it("applies the fixed status rule: tolerance max(0.01, 2·paper std, 2·standard error)", () => {

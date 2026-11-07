@@ -30,6 +30,8 @@ export function validatePlan(claims: Claim[], raw: unknown): { specs: RunSpec[];
     const r = runs.find((x) => (x as { claim?: string })?.claim === c.id) as Partial<RunSpec> | undefined;
     if (!r) { errors.push(`no run for claim ${c.id}`); continue; }
     if (!Array.isArray(r.argv) || !r.argv.length || !r.argv.every((a) => typeof a === "string")) { errors.push(`${c.id}: argv must be a non-empty list of strings`); continue; }
+    // A run launches the repository's own entrypoint. Inline programs would change code without patch review.
+    if (r.argv.some((a, i) => (a === "-c" && i > 0 && /^(python3?|sh|bash)$/.test(r.argv![i - 1]!)) ) || /^(sh|bash)$/.test(r.argv[0]!) && r.argv.includes("-c")) { errors.push(`${c.id}: inline programs (python -c, sh -c) are not allowed; run a script of the repository, and leave code changes to the debugger`); continue; }
     let groups = -1;
     try { groups = new RegExp(`${String(r.parse)}|`).exec("")!.length - 1; } catch { /* invalid */ }
     if (typeof r.parse !== "string" || groups !== 1) { errors.push(`${c.id}: parse must be a regex with exactly one capture group`); continue; }
