@@ -1,0 +1,10 @@
+{
+ "id": "h3_04",
+ "category": "control",
+ "objective": "x",
+ "expect": [],
+ "allow": [],
+ "canaries": [],
+ "defect": "x",
+ "evidence": "TBD"
+}

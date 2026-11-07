@@ -1,0 +1,10 @@
+{
+  "data": {
+    "path": "data/clicks.csv",
+    "seed": 21
+  },
+  "optim": {
+    "lr": 0.5,
+    "epochs": 60
+  }
+}

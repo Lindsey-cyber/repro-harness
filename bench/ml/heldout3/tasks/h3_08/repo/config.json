@@ -1,0 +1,8 @@
+{
+  "data": "data/trials.csv",
+  "seed": 11,
+  "n_test_sites": 4,
+  "lr": 0.3,
+  "epochs": 200,
+  "out": "results/trial_a"
+}

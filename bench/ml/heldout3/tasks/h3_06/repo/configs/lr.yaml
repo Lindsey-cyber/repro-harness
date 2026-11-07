@@ -1,0 +1,7 @@
+name: lr_branch
+data: data/loans.csv
+seed: 5
+test_frac: 0.25
+smooth: 1.0
+lr: 0.3
+epochs: 400

@@ -1,0 +1,3 @@
+train.csv and test.csv are synthetic. Points are drawn uniformly in [-3,3]^2 (different random seeds for
+the two files, so no point appears in both), points with |u+v| < 0.5 are rejected, and the class is A if
+u+v > 0 else B. The classes are therefore linearly separable with margin by construction.

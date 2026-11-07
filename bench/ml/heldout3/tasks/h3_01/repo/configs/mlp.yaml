@@ -1,0 +1,6 @@
+name: mlp_h48
+data: data/blobs.csv
+hidden: 48
+lr: 0.4
+wd: 0.0
+epochs: 1500
