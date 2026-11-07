@@ -1,6 +1,6 @@
 # Verifiable harness for ML experiment reproduction and debugging
 
-Status: milestone 1 (M1) is in place on branch `mlh`. Code lives in `src/mlh/`, the benchmark in `bench/ml/`, and the results in `bench/ml/results/`. Commands: `npm run mlh -- run <repo|https://github.com/…> --objective "…"` and `npm run mlh -- bench`.
+Status: milestones 1–2 are in place on branch `mlh`; §6 holds the M2 results on blind benchmarks, which supersede §4's same-author numbers as evidence. Code lives in `src/mlh/`, the benchmark in `bench/ml/`, and the results in `bench/ml/results/`. Commands: `npm run mlh -- run <repo|https://github.com/…> --objective "…"` and `npm run mlh -- bench`.
 
 ## 1. Gap analysis of the existing repository
 
@@ -77,7 +77,7 @@ These were fixed before the first benchmark run and are the same for every repos
 
 ### Key trade-offs
 
-- **No LLM in the M1 loop.** Every M1 decision can be made deterministically. No API key is available in this environment, so an LLM component could not have been measured, and the brief forbids unmeasured claims. LLMs are planned where determinism runs out (§5). The trace already carries `tokens`/`costUsd` fields, which are 0 today.
+- **No LLM in the M1 loop** (M2 adds LLM components; see §6). Every M1 decision can be made deterministically. No API key is available in this environment, so an LLM component could not have been measured, and the brief forbids unmeasured claims. LLMs are planned where determinism runs out (§5). The trace already carries `tokens`/`costUsd` fields, which are 0 today.
 - **A convention-light manifest instead of arbitrary repositories.** Inference covers common layouts (train.py/eval.py, *train*/*test* CSVs, metrics JSON, predictions CSV, a README claim). `mlh.json` overrides it, and anything not inferred becomes a coverage gap. This is the main limitation for real-world repositories.
 - **Linux namespaces instead of containers.** They need no daemon or image and start in about 10 ms, so they suit limited local compute. Isolation is weaker than a VM's. CPU is limited per process, not per process tree.
 - **One fixed seed set for the fault injection.** Results are reproducible but are one sample per rate.
@@ -151,3 +151,83 @@ What the numbers show, and what they do not:
    - Experiment metadata store across runs (structured memory: per-repository manifests, past findings).
    - Larger compute limits per skill.
    - Trust promotion from the audit history (`recordAudit` fed by benchmark runs; promotion through a human command).
+
+
+## 6. M2: LLM components, a single-agent baseline and blind benchmarks
+
+### What was added
+
+**LLM client** (`io/llm.ts`):
+- OpenAI-compatible; DeepSeek by default (`deepseek-flash` proposes, `deepseek-v4-pro` reviews);
+- meters tokens, cost and latency per node, recorded in `trace.jsonl`;
+- a record/replay cache: reruns are free and reproducible, and cached entries keep the original usage;
+- `MLH_LLM_SALT` separates benchmark repeats.
+
+Cost uses list prices from third-party trackers (flash $0.14/$0.28, pro $1.74/$3.48 per 1M input/output tokens). DeepSeek's own page did not show rates, so treat cost as an estimate.
+
+**Authorization.** `model_query` (sending repository content to a provider) is high risk. The only evidence that allows it is the human's `--llm` flag. A model's approval never allows it.
+
+**Manifest:**
+- inference prefers commands documented in the README;
+- an ambiguous claim (several candidate numbers) is left unset, not guessed;
+- a model fills the gaps, and each proposed field is kept only if deterministic checks pass: the script exists, the files exist, the label is in the header, the claimed number appears in the README;
+- output paths are resolved by observation: whatever file the run actually wrote replaces a declared path that does not exist.
+
+**`llm.hypothesize` → `llm.check`.** The proposer suggests defects, each with an executable check. A hypothesis is confirmed only if both hold:
+- the check, run in a fresh sandbox after training, prints `supports: true`;
+- a different model judges that the check tests the claim and that the output shows an effect.
+
+**Single-agent baseline** (`agent.ts`):
+- one model with list/read/write/run tools, in one sandbox under the same authorization;
+- the same objective and finding vocabulary as the harness;
+- no independent verification;
+- a 30-step budget.
+
+**Two blind benchmarks**, each written by a separate agent that was forbidden to read the harness, its thresholds, earlier benchmarks or results. Each has 12 tasks with varied layouts, configs, CLI flags, npz data, id and string columns, and 2 defects outside the known categories.
+- `bench/ml/heldout`: blind for its first run only (`heldout-BLIND-v1`). I then fixed generic failures it exposed, so later numbers on it are "post-fix", not blind.
+- `bench/ml/heldout2`: the code was frozen at commit `15a2a77` before its first run. Results are in `heldout2-BLIND-r1` and `heldout2-BLIND-r2-llm` (a second sample of the LLM modes).
+
+### Results
+
+**Solved tasks** (strict scoring; "other:" slugs must match):
+
+| benchmark | naive | workflow | harness (deterministic) | single agent | hybrid (harness + LLM) |
+|---|---|---|---|---|---|
+| own tasks (same author) | 4/12 | 10/12 | **12/12** | **12/12** | **12/12** |
+| heldout, blind v1 (M1 code) | 1/12 | 1/12 | 1/12 | **7/12** | 1/12 |
+| heldout, after generic fixes (not blind) | 2/12 | 6/12 | 5/12 | **8/12** | 6/12 |
+| **heldout2, blind** (run 1 / run 2) | 3/12 | 4/12 | 4/12 | **9/12 / 9/12** | 6/12 / 8/12 |
+
+**heldout2 (blind) detail:**
+
+| | harness | single agent (r1 / r2) | hybrid (r1 / r2) |
+|---|---|---|---|
+| defect recall | 0.13 | 0.75 / 0.75 | 0.63 / 0.63 |
+| false positives (on clean controls) | 0 (0) | 2 (0) / 3 (0) | 3 (2) / 3 (1) |
+| median wall time per task | 1.0 s | 49 s / 40 s | 172 s / 214 s |
+| LLM tokens | 0 | 0.91M / 1.10M | 0.37M / 0.33M |
+| estimated cost | $0 | $0.05 / $0.06 | $0.32 / $0.28 |
+| model hypotheses | — | — | 21 proposed: 8 confirmed, 13 refuted / 7 confirmed, 12 refuted |
+
+No mode let a side effect escape the sandbox on any benchmark. The naive mode let 2 escape on the unsafe task.
+
+### What this shows
+
+1. **The deterministic harness has high precision but generalizes poorly.**
+   - It had zero false positives on clean controls across all three benchmarks, and the fixed workflow raised only 1 false positive on heldout2.
+   - Its recall on unfamiliar repositories is 0.13–0.22.
+   - The skills assume layouts like the author's (CSV splits, a metrics json, a predictions file). The same-author 12/12 measured that fit, not capability.
+2. **A single agent with tools beat every structured variant on blind tasks.** It solved 9/12 in both samples, raised 0 false positives on controls, cost the least per token, and was faster than hybrid. Its errors are mostly mis-categorisation (e.g. a metric bug filed as `other:`) and missing out-of-vocabulary defects.
+3. **Model-written checks plus a cross-model review are not a reliable verifier.**
+   - All hybrid false positives on controls were model hypotheses that passed both gates.
+   - Example, `meter_events` (legitimate recurring rows): the check's own numbers show no effect (F1 0.728 vs 0.708), yet it printed `supports: true` and the reviewer accepted it.
+   - Re-scoring the saved runs with a strict policy, where a model-origin finding is never confirmed without a deterministic confirmer, removes every control false positive (2→0, 1→0). It also collapses recall (5→1 and 5→2 of 8 expected defects). Precision and recall trade off directly, and today only deterministic confirmers deliver precision.
+4. **The hybrid is the most expensive mode and was beaten by the single agent.** The pro reviewer costs more than the agent's whole run, and serial node latency adds up. As designed, it is not worth it.
+
+### Consequences for the design (next milestone)
+
+- **Use the agent as the explorer, not the planner of fixed skills.** It handles unfamiliar layouts far better than inference does. Keep the harness for what it measurably did well: sandbox plus authorization (0 escapes), journaled resume, retries, and deterministic confirmers.
+- **Route each agent finding to a deterministic confirmer of its category where one exists.** Example: entity overlap goes to the group-aware re-split, a metric mismatch to recomputation from predictions. Report the rest as "model-supported, unverified" rather than as confirmed. The ablation above measures the cost of this choice.
+- **Make LLM checks falsifiable.** Require a check to report an effect size and compare it with a fixed materiality threshold computed by the harness, instead of trusting the check's own `supports` flag. `meter_events` would then have been rejected.
+- **Do not pin hidden nondeterminism in reruns.** `PYTHONHASHSEED` is pinned for determinism. That hides hash-order nondeterminism (heldout2 `topic_vocab`), so `repro.rerun` should vary it on the second run.
+- **Measure variance properly.** Two samples per LLM mode is not enough for confidence intervals. Use at least 5 repeats, and blind sets written by humans or more independent authors.
