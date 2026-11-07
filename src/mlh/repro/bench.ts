@@ -3,7 +3,7 @@
 //   solo   : one agent with every tool (paper, files, shell, install), no verification, no checkpoints
 //   team   : the harness: specialized agents, checkpointed nodes, deterministic runs/status, patch review
 // Scoring follows the SPEC; ground truth (task.json, inject.patch, reference/) is read only here.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { agentLoop } from "../agentloop.ts";
 import { Llm } from "../io/llm.ts";
@@ -158,6 +158,7 @@ async function solo(t: Task, src: string, dir: string, o: RunOpts): Promise<Resu
       }
       const r = await agentLoop({ role: SOLO_ROLE, workDir: join(dir, `solo-${attempts}`), source: src, task: `Objective: ${t.objective}`, model, isolation: o.isolation, isolationEvidence: { kind: "deterministic", check: "selftest", ok: o.isolation === "namespace" }, paper, install: (pk, _i, cur) => sites.install(pk, cur) });
       report = r.report; ws = r.workspace;
+      writeFileSync(join(dir, "solo-report.json"), JSON.stringify(r.report, null, 1));
       if (!report) break;
     } catch (e) { error = String(e); if (!o.soloRetries) break; }
   }
@@ -211,8 +212,13 @@ export async function runReproBench(o: { modes: Mode[]; tasks?: string[]; out: s
   const tasks: Task[] = ids.map((id) => JSON.parse(readFileSync(join(TASKS, id, "task.json"), "utf8")));
   const st = await selfTest(join(CACHE, "selftest"));
   const scratch = join(CACHE, "runs", `${o.label ?? "run"}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-  const results: Result[] = [];
-  const queue = tasks.flatMap((t, i) => o.modes.map((m) => [t, i, m] as const));
+  // Results are appended as they finish, so an interrupted benchmark resumes where it stopped.
+  mkdirSync(o.out, { recursive: true });
+  const name = `repro-${o.label ?? "latest"}`;
+  const partial = join(o.out, `${name}.jsonl`);
+  const results: Result[] = existsSync(partial) ? readFileSync(partial, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Result) : [];
+  const done = new Set(results.map((r) => `${r.task}/${r.mode}`));
+  const queue = tasks.flatMap((t, i) => o.modes.map((m) => [t, i, m] as const)).filter(([t, , m]) => !done.has(`${t.id}/${m}`));
   await Promise.all(Array.from({ length: Math.min(o.parallel ?? 3, queue.length) }, async () => {
     for (let job = queue.shift(); job; job = queue.shift()) {
       const [t, i, mode] = job;
@@ -223,16 +229,20 @@ export async function runReproBench(o: { modes: Mode[]; tasks?: string[]; out: s
         const src = await prepare(t);
         const r = mode === "team" ? await team(t, src, dir, ro) : mode === "solo" ? await solo(t, src, dir, ro) : await script(t, src, dir, ro);
         results.push(r);
+        appendFileSync(partial, JSON.stringify(r) + "\n");
         console.log(`${t.id.padEnd(30)} ${mode.padEnd(6)} ${r.solved ? "SOLVED" : "------"} status ${r.statusCorrect}/${t.expected.length} claims ${r.claimsFound}/${t.claims.length} causes ${JSON.stringify(r.causes)} patch=${r.patch} held=${r.held} ${Math.round(r.wallMs / 1000)}s tok=${r.tokens}${r.error ? ` ERR ${r.error.slice(0, 120)}` : ""}`);
       } catch (e) {
-        results.push(finish(t, mode, { statuses: {}, claimsFound: 0, causes: [], error: String(e).slice(0, 500) }));
+        const r = finish(t, mode, { statuses: {}, claimsFound: 0, causes: [], error: String(e).slice(0, 500) });
+        results.push(r);
+        appendFileSync(partial, JSON.stringify(r) + "\n");
         console.log(`${t.id} ${mode} ERROR ${String(e).slice(0, 300)}`);
       }
     }
   }));
   results.sort((a, b) => a.task.localeCompare(b.task) || o.modes.indexOf(a.mode) - o.modes.indexOf(b.mode));
+  const scored = results.filter((r) => tasks.some((t) => t.id === r.task) && o.modes.includes(r.mode));
   const agg = Object.fromEntries(o.modes.map((m) => {
-    const rs = results.filter((r) => r.mode === m);
+    const rs = scored.filter((r) => r.mode === m);
     const avg = (xs: (number | null)[]) => { const v = xs.filter((x): x is number => x !== null); return v.length ? Number((v.reduce((a, b) => a + b, 0) / v.length).toFixed(3)) : null; };
     return [m, {
       tasks: rs.length, solved: rs.filter((r) => r.solved).length,
@@ -245,8 +255,6 @@ export async function runReproBench(o: { modes: Mode[]; tasks?: string[]; out: s
       tokens: rs.reduce((a, r) => a + r.tokens, 0), costUsd: Number(rs.reduce((a, r) => a + r.costUsd, 0).toFixed(3)),
     }];
   }));
-  mkdirSync(o.out, { recursive: true });
-  const name = `repro-${o.label ?? "latest"}`;
   writeFileSync(join(o.out, `${name}.json`), JSON.stringify({ at: new Date().toISOString(), options: { ...o, out: undefined }, byMode: agg, results }, null, 1));
   const keys = Object.keys(agg[o.modes[0]!]!);
   const md = [`# Reproduction benchmark: ${name}`, "", `options: ${JSON.stringify({ approve: o.approve ?? "all", providerFaults: o.providerFaults ?? 0, crashAfterSteps: o.crashAfterSteps ?? null })}`, "", `| metric | ${o.modes.join(" | ")} |`, `|---|${o.modes.map(() => "---").join("|")}|`,
