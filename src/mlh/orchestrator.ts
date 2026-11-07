@@ -2,7 +2,7 @@
 // parallel, authorizes each node's actions before it runs, retries what a
 // fresh attempt can fix, replans on results, and writes the report. Every
 // state change is journaled first, so a killed process resumes where it was.
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { authorize, type Action, type Evidence } from "./core/authz.ts";
 import { apply, blocked, depOf, ready, replay, settled, type RunEvent, type RunState, type TaskNode } from "./core/dag.ts";
@@ -17,9 +17,13 @@ import { DEFAULT_LIMITS, Sandbox, selfTest, SkillError, type Isolation, type Lim
 import { addUsage, meter, zeroUsage, type Usage } from "./io/llm.ts";
 import type { Models, SkillCtx } from "./skills/index.ts";
 import { skill, SKILLS } from "./skills/registry.ts";
+import * as flow from "./repro/flow.ts";
+import { renderRepro } from "./repro/report.ts";
+import { siteManager } from "./repro/site.ts";
 
 // agentic: an exploring agent node leads; its findings are routed to independent confirmers.
-export type Mode = "harness" | "workflow" | "agentic";
+// repro: reproduce a paper's claims with specialized agents (src/mlh/repro).
+export type Mode = "harness" | "workflow" | "agentic" | "repro";
 
 export interface RunOptions {
   runDir: string;
@@ -36,6 +40,10 @@ export interface RunOptions {
   // send repository content to that provider (the only evidence for model_query).
   llm?: Models;
   crashAfterSteps?: number; // exit after this many agent steps in this process (recovery tests)
+  // Reproduction runs: the paper and how much autonomy patches get.
+  arxiv?: string;
+  approvePolicy?: "none" | "medium" | "all";
+  sitesDir?: string; // shared package sites (default .mlh/sites)
 }
 
 export interface RunResult {
@@ -94,9 +102,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     if (!o.source || !o.objective) throw new Error("a new run needs a source and an objective");
     mkdirSync(runDir, { recursive: true });
     const { rev } = await fetchSource(o.source, srcDir);
-    writeFileSync(join(runDir, "run.json"), JSON.stringify({ source: o.source, rev, objective: o.objective, mode, created: now() }, null, 1));
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({ source: o.source, rev, objective: o.objective, mode, created: now(), ...(o.arxiv ? { arxiv: o.arxiv, approvePolicy: o.approvePolicy ?? "medium" } : {}) }, null, 1));
     emit({ t: "run", at: now(), objective: o.objective, source: o.source, mode });
-    for (const n of initialPlan()) emit({ t: "node", at: now(), node: n, why: "initial plan" });
+    for (const n of mode === "repro" ? flow.initialNodes() : initialPlan()) emit({ t: "node", at: now(), node: n, why: "initial plan" });
   } else if (!existsSync(srcDir)) throw new Error(`cannot resume ${runDir}: source copy missing`);
   events = [];
 
@@ -107,7 +115,15 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const limits = o.limits ?? DEFAULT_LIMITS;
   const concurrency = o.concurrency ?? 3;
   let completedHere = 0, retried = 0, attemptsHere = 0, llmTotal = zeroUsage();
-  const specs = SKILLS.filter((s) => (o.llm || !s.actions.includes("model_query")) && (mode === "agentic" || (s.id !== AGENT && !s.id.startsWith("verify."))) && (mode !== "agentic" || !s.id.startsWith("llm.")));
+  const runMeta = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { arxiv?: string; approvePolicy?: "none" | "medium" | "all" };
+  const repro = mode === "repro" ? {
+    arxiv: runMeta.arxiv ?? o.arxiv ?? "",
+    approvePolicy: runMeta.approvePolicy ?? o.approvePolicy ?? "medium",
+    sites: siteManager(resolve(o.sitesDir ?? ".mlh/sites"), { isolation: st.isolation, stats }),
+    versionDir: (v: number) => (v === 0 ? srcDir : join(runDir, "versions", `v${v}`)),
+  } : undefined;
+  const specs = mode === "repro" ? SKILLS.filter((s) => s.id.startsWith("repro."))
+    : SKILLS.filter((s) => !s.id.startsWith("repro.") && (o.llm || !s.actions.includes("model_query")) && (mode === "agentic" || (s.id !== AGENT && !s.id.startsWith("verify."))) && (mode !== "agentic" || !s.id.startsWith("llm.")));
   const detSpecs = specs.filter((s) => s.id !== AGENT);
   // Explicit mlh.json > what the exploring agent validated > inference.
   const manifest = (): Manifest => {
@@ -118,6 +134,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   };
 
   const afterOk = (n: TaskNode, findings: number) => {
+    if (mode === "repro") { for (const node of flow.afterOk(state, n.id)) if (!state.nodes.has(node.id)) emit({ t: "node", at: now(), node, why: `after ${n.id}` }); return; }
     if (n.id === INSPECT && mode === "agentic") {
       emit({ t: "node", at: now(), node: { id: AGENT, skill: AGENT, deps: [INSPECT], purpose: "detect", params: {} }, why: "the exploring agent leads" });
     }
@@ -166,6 +183,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
       ...(models ? { llm: models } : {}),
       workDir: () => join(runDir, "work", n.id.replace(/[^\w.-]+/g, "_")),
       sourceDir: srcDir,
+      stats,
+      approved: ns.approved,
+      ...(repro ? { repro } : {}),
       isolation: st.isolation,
       isolationEvidence,
       ...(o.faults ? { sandboxFault: (() => { let k = 0; return () => faultFor(o.faults!.rate, o.faults!.seed, `${n.id}#${attempt}#agent#${k++}`); })() } : {}),
@@ -199,6 +219,12 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
         const again = findings.filter((f) => f.category === n.params.category);
         confirmation = { target: n.target, supports: again.length > 0, note: again.length ? `replicated on a fresh run: ${again[0]!.summary}` : `not reproduced on a fresh run` };
       }
+      if (out.hold) {
+        emit({ t: "hold", at: now(), id: n.id, reason: out.hold });
+        writeFileSync(join(runDir, "pending.json"), JSON.stringify(state.order.filter((id) => state.nodes.get(id)!.status === "held").map((id) => ({ id, reason: state.nodes.get(id)!.reason })), null, 1));
+        appendFileSync(tracePath, JSON.stringify({ at: now(), id: n.id, skill: sk.id, version: sk.version, attempt, outcome: "hold", ms: Math.round(performance.now() - started) }) + "\n");
+        return;
+      }
       emit({ t: "ok", at: now(), id: n.id, output: out.output, findings, artifacts: saved, ...(confirmation ? { confirmation } : {}) });
       if (out.gap) emit({ t: "gap", at: now(), skill: sk.id, reason: out.gap });
       outcome = "ok";
@@ -211,6 +237,8 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
       if (state.nodes.get(n.id)!.status === "pending") {
         retried++;
         await new Promise((r) => setTimeout(r, 50 * 2 ** attempt));
+      } else if (mode === "repro") {
+        for (const node of flow.afterFail(state, n.id)) if (!state.nodes.has(node.id)) emit({ t: "node", at: now(), node, why: `after ${n.id} failed` });
       }
     }
     const used = models ? addUsage(models.proposer.usage, models.reviewer.usage) : zeroUsage();
@@ -235,7 +263,11 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const m = manifest();
   const arts = state.order.flatMap((id) => state.nodes.get(id)!.artifacts.map((a) => ({ node: id, name: a.name, sha256: a.sha256 })));
   const reportPath = join(runDir, "report.md");
-  writeFileSync(reportPath, renderReport(state, m, { artifacts: arts, reproduce: `npm run mlh -- run ${JSON.stringify(state.source)} --objective ${JSON.stringify(state.objective)} --mode ${mode}` }));
+  // Top-level packages and modules of the repository, so a failed import of one of them reads as an import-path problem.
+  const local = new Set(existsSync(srcDir) ? readdirSync(srcDir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() && existsSync(join(srcDir, e.name, "__init__.py")) ? [e.name] : e.name.endsWith(".py") ? [e.name.slice(0, -3)] : [])) : []);
+  const rr = mode === "repro" ? renderRepro(state, local) : undefined;
+  if (rr) writeFileSync(join(runDir, "repro.json"), JSON.stringify(rr.json, null, 1));
+  writeFileSync(reportPath, rr ? rr.markdown : renderReport(state, m, { artifacts: arts, reproduce: `npm run mlh -- run ${JSON.stringify(state.source)} --objective ${JSON.stringify(state.objective)} --mode ${mode}` }));
   const summary = summarize(state);
   writeFileSync(join(runDir, "summary.json"), JSON.stringify(summary, null, 1));
   writeFileSync(join(runDir, "context.txt"), compact(state));

@@ -10,7 +10,10 @@ export type Action =
   | "network_egress" // repository code reaching the network
   | "write_outside_workspace"
   | "publish" // push, open a PR, post anywhere
-  | "model_query"; // send repository content to an external model provider
+  | "model_query" // send repository content to an external model provider
+  | "install_packages" // network to package indexes only, inside an install-only sandbox
+  | "apply_patch" // a code change proposed by an agent becomes the source later runs use
+  | "apply_eval_patch"; // the same, for a change that touches evaluation, metric, data-split or seeding code
 
 export type Risk = "low" | "medium" | "high";
 
@@ -24,6 +27,10 @@ export const RISK: Record<Action, Risk> = {
   publish: "high",
   // Data leaves the machine: only the human's standing approval (the --llm flag) allows it.
   model_query: "high",
+  install_packages: "medium",
+  apply_patch: "medium",
+  // An agent editing how the result is measured is exactly what could fake a reproduction.
+  apply_eval_patch: "high",
 };
 
 export interface Evidence {

@@ -31,6 +31,18 @@ async function main(): Promise<void> {
       console.log(`${r.reportPath}\nconfirmed: ${r.summary.confirmed.map((f) => f.category).join(", ") || "none"}; unverified: ${r.summary.unverified.length}; held: ${r.summary.held.length}`);
       break;
     }
+    case "repro": {
+      // Reproduce a paper's claims: mlh repro <repo|https://github.com/...> --arxiv <id> --objective "..." --llm [--approve none|medium|all]
+      const runDir = flag("run-dir") ?? join(".mlh", "runs", `repro-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+      const r = await runHarness({
+        runDir, source: positional[0]!, objective: flag("objective") ?? "Reproduce the paper's main results with this repository.", mode: "repro",
+        arxiv: flag("arxiv")!, approvePolicy: (flag("approve") as "none" | "medium" | "all" | undefined) ?? "medium", concurrency: Number(flag("concurrency") ?? 3),
+        ...(flag("crash-after-steps") ? { crashAfterSteps: Number(flag("crash-after-steps")) } : {}),
+        ...models(),
+      });
+      console.log(r.reportPath);
+      break;
+    }
     case "resume": {
       const r = await runHarness({ runDir: positional[0]!, ...(flag("trust") ? { trustFile: flag("trust")! } : {}), ...models() });
       console.log(`${r.reportPath}\nconfirmed: ${r.summary.confirmed.map((f) => f.category).join(", ") || "none"}`);

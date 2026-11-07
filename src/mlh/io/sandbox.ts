@@ -58,6 +58,18 @@ export interface SandboxStats {
   ms: number;
 }
 
+export interface SandboxOptions {
+  isolation: Isolation;
+  limits: Limits;
+  stats: SandboxStats;
+  fault?: () => boolean;
+  // Installed packages: a host directory mounted read-only at /opt and put on PYTHONPATH.
+  site?: string;
+  // Network for package installation only: the site becomes writable and the proxy reachable.
+  // Never used to run repository code (authorization: install_packages).
+  network?: boolean;
+}
+
 export class Sandbox {
   private constructor(
     readonly dir: string,
@@ -65,19 +77,21 @@ export class Sandbox {
     readonly limits: Limits,
     private readonly stats: SandboxStats,
     private readonly fault: () => boolean,
+    readonly site: string | undefined,
+    readonly network: boolean,
   ) {}
 
-  static create(parent: string, name: string, source: string, o: { isolation: Isolation; limits: Limits; stats: SandboxStats; fault?: () => boolean }): Sandbox {
+  static create(parent: string, name: string, source: string, o: SandboxOptions): Sandbox {
     const dir = join(parent, name.replace(/[^\w.-]+/g, "_"));
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(parent, { recursive: true });
     cpSync(source, dir, { recursive: true, filter: (p) => !/\/\.git(\/|$)/.test(p) });
-    return new Sandbox(dir, o.isolation, o.limits, o.stats, o.fault ?? (() => false));
+    return new Sandbox(dir, o.isolation, o.limits, o.stats, o.fault ?? (() => false), o.site, o.network ?? false);
   }
 
   // A sandbox over an existing directory (a persistent agent workspace); nothing is copied or removed.
-  static attach(dir: string, o: { isolation: Isolation; limits: Limits; stats: SandboxStats; fault?: () => boolean }): Sandbox {
-    return new Sandbox(dir, o.isolation, o.limits, o.stats, o.fault ?? (() => false));
+  static attach(dir: string, o: SandboxOptions): Sandbox {
+    return new Sandbox(dir, o.isolation, o.limits, o.stats, o.fault ?? (() => false), o.site, o.network ?? false);
   }
 
   private wrap(cmd: string[]): string[] {
@@ -85,15 +99,22 @@ export class Sandbox {
     const lim = ["prlimit", `--cpu=${l.cpuSec}`, `--as=${l.memMB * 1024 * 1024}`, `--fsize=${l.fileMB * 1024 * 1024}`, "--nofile=512", "--"];
     if (this.isolation === "none") return [...lim, ...cmd];
     // Bind mounts first: the tmpfs over /home would otherwise hide the sandbox copy.
-    const script = 'set -e; mount --bind "$W" /mnt; mount --bind "$P" /srv; mount -o remount,bind,ro /srv; ' +
+    const site = this.site ? `mount --bind "$S" /opt; ${this.network ? "" : "mount -o remount,bind,ro /opt; "}` : "";
+    // With network (installing), the proxy's CA bundle is bound over the system one so /root stays hidden.
+    const ca = this.network && process.env.SSL_CERT_FILE && existsSync(process.env.SSL_CERT_FILE) ? 'mount --bind "$CA" /etc/ssl/certs/ca-certificates.crt; ' : "";
+    const script = 'set -e; mount --bind "$W" /mnt; mount --bind "$P" /srv; mount -o remount,bind,ro /srv; ' + site + ca +
       "mount -t tmpfs none /tmp; mount -t tmpfs none /home; mount -t tmpfs none /root; mount -o remount,bind,ro /; " +
       'cd /mnt; "$@"; s=$?; echo "MLH_EXIT=$s" >&2; exit $s';
-    return ["unshare", "-r", "-n", "-m", "--fork", "sh", "-c", script, "sh", ...lim, ...cmd];
+    return ["unshare", "-r", ...(this.network ? [] : ["-n"]), "-m", "--fork", "sh", "-c", script, "sh", ...lim, ...cmd];
   }
 
   async run(cmd: string[], env: Record<string, string> = {}): Promise<SandboxResult> {
     if (this.fault()) throw new SkillError("sandbox_transient", "injected transient sandbox failure");
-    const full = { ...BASE_ENV, ...env, W: this.dir, P: PROBES };
+    const net: Record<string, string> = this.network ? {
+      ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY, https_proxy: process.env.HTTPS_PROXY } : {}),
+      ...(process.env.SSL_CERT_FILE ? { CA: process.env.SSL_CERT_FILE, SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt", PIP_CERT: "/etc/ssl/certs/ca-certificates.crt", REQUESTS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt" } : {}),
+    } : {};
+    const full = { ...BASE_ENV, ...(this.site ? { PYTHONPATH: "/opt:/mnt", S: this.site } : {}), ...net, ...env, W: this.dir, P: PROBES };
     const r = await runProc(this.wrap(cmd), { cwd: this.dir, env: full, timeoutMs: this.limits.timeoutMs });
     this.stats.runs++; this.stats.ms += r.ms;
     return { ...r, category: classify(r) };

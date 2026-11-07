@@ -36,6 +36,10 @@ export interface SkillCtx {
   isolationEvidence: Evidence;
   sandboxFault?: () => boolean;
   crashAfterSteps?: number;
+  // Reproduction runs only.
+  repro?: import("../repro/skills.ts").ReproCtx;
+  stats: import("../io/sandbox.ts").SandboxStats;
+  approved: boolean; // a human approved this node (mlh approve)
 }
 
 export interface SkillOutcome {
@@ -44,6 +48,8 @@ export interface SkillOutcome {
   confirmation?: { supports: boolean; note: string; inconclusive?: boolean; tier?: "deterministic" | "measured" };
   // The skill ran but could not check what it is for (e.g. no predictions file): reported as a coverage gap.
   gap?: string;
+  // Authorization decided inside the skill (e.g. a patch's risk is known only after reading it): hold for a human.
+  hold?: string;
 }
 
 export interface Skill extends SkillSpec {
