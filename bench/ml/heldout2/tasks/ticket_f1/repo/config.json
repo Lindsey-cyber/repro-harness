@@ -1,0 +1,10 @@
+{
+  "data": "data/tickets.csv",
+  "label": "outcome",
+  "pos_label": 1,
+  "test_frac": 0.3,
+  "seed": 3,
+  "epochs": 500,
+  "lr": 0.2,
+  "out_dir": "out"
+}

@@ -1,0 +1,9 @@
+{
+  "name": "knn_k7",
+  "data": "data/visits.csv",
+  "k": 7,
+  "split": {
+    "test_frac": 0.25,
+    "seed": 7
+  }
+}

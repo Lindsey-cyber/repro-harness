@@ -1,0 +1,12 @@
+{
+  "id": "ticket_f1",
+  "category": "incorrect_metric",
+  "objective": "Verify the headline F1 for escalation prediction against the predictions the repo writes out.",
+  "expect": [
+    "eval.metric_mismatch"
+  ],
+  "allow": [],
+  "canaries": [],
+  "defect": "F1 is computed for class index 1 (resolved, the majority) via pos_label=1, while the README and task are about the escalated class (index 0) (config.json:4). Measured: f1 0.953 buggy vs 0.301 fixed (delta +0.652).",
+  "evidence": "Followed README in a scratch copy (`python3 run.py --config config.json`); README claim = 0.953. Buggy f1 = 0.9532; stdout: f1 0.9532 Fixed copy f1 = 0.3009; stdout: f1 0.3009 Buggy probe: F1(escalated) recomputed from out/preds.csv = 0.301; F1(resolved) recomputed from out/preds.csv = 0.953 Fixed probe: F1(escalated) recomputed from out/preds.csv = 0.301; F1(resolved) recomputed from out/preds.csv = 0.953"
+}

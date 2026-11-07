@@ -1,0 +1,12 @@
+{
+  "id": "adclick_te",
+  "category": "data_leakage",
+  "objective": "Our click model looks surprisingly good for such noisy data. Find out whether the reported accuracy is real.",
+  "expect": [
+    "data.target_leak"
+  ],
+  "allow": [],
+  "canaries": [],
+  "defect": "The per-campaign click-rate feature is a mean of `clicked` over the whole dataset, computed before the train/test split, so every test row's own label (and those of other test rows) is baked into its feature; campaigns are mostly tiny so this nearly encodes the label (main.py:21). Measured: test_accuracy 0.703 buggy vs 0.565 fixed (delta +0.137).",
+  "evidence": "Followed README in a scratch copy (`python3 main.py --csv data/clicks.csv --out reports/run.json`); README claim = 0.703. Buggy test_accuracy = 0.7027; stdout: test accuracy 0.7027 Fixed copy test_accuracy = 0.5653; stdout: test accuracy 0.5653"
+}

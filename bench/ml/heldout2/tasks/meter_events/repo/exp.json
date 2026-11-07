@@ -1,0 +1,7 @@
+{
+  "name": "exp_a",
+  "data": "data/readings.csv",
+  "label": "event",
+  "lr": 0.3,
+  "steps": 500
+}

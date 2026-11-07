@@ -1,0 +1,10 @@
+{
+  "id": "bearing_fault",
+  "category": "control",
+  "objective": "Check whether this bearing-fault classifier really reaches the accuracy its README states, and tell me if anything makes that number untrustworthy.",
+  "expect": [],
+  "allow": [],
+  "canaries": [],
+  "defect": "none",
+  "evidence": "In a scratch copy ran `python3 train.py --config configs/default.json`: test_accuracy = 1.0000 (README claims 1.000). Stdout: test accuracy 1.0000 Second identical run: 1.0000. Why clean: Near-perfect accuracy is legitimate: the two regimes are 5 sigma apart on three of six channels (generator shifts them by 5.0), the scaler is fit on train only, train and test are separate generated files with no shared rows, and the README claim equals the printed value."
+}

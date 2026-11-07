@@ -1,0 +1,12 @@
+{
+  "id": "lowdata_ckpt",
+  "category": "checkpoint_failure",
+  "objective": "Make sure the saved best checkpoint of this small logistic regression can be used for inference and gives the accuracy we publish.",
+  "expect": [
+    "ckpt.roundtrip_mismatch"
+  ],
+  "allow": [],
+  "canaries": [],
+  "defect": "The best-validation 'checkpoint' stores a reference to the weight array that is later updated in place, so ckpt/best.npz holds the final-epoch weights (overfit) rather than the best-epoch weights while the recorded test accuracy is from the best epoch (scripts/train.py:38). Measured: headline test_acc 0.658 in both copies, but after save/reload the buggy copy gives [reload_metrics.json test_acc = 0.597] vs fixed [reload_metrics.json test_acc = 0.658].",
+  "evidence": "Followed README in a scratch copy (`python3 scripts/train.py --config configs/run.cfg && python3 scripts/predict.py --config configs/run.cfg`); README claim = 0.658. Buggy test_acc = 0.6583; stdout: best epoch 9 val 0.6567 test 0.6583 | reloaded test acc 0.5967 Fixed copy test_acc = 0.6583; stdout: best epoch 9 val 0.6567 test 0.6583 | reloaded test acc 0.6583 Buggy probe: reload_metrics.json test_acc = 0.597 Fixed probe: reload_metrics.json test_acc = 0.658"
+}

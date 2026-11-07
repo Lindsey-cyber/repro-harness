@@ -84,7 +84,7 @@ def data_loan(rs):
     income = np.exp(rs.randn(n) * 0.5 + 10.8)
     debt = rs.beta(2, 4, n)
     prior = rs.poisson(0.45, n)
-    z = -1.6 + 1.9 * prior + 2.0 * (debt - 0.33) - 0.5 * np.log(income / 49000) + 0.6 * (emp == "unemployed") + 0.2 * (purpose == "medical")
+    z = -2.2 + 3.2 * prior + 3.0 * (debt - 0.33) - 0.5 * np.log(income / 49000) + 0.6 * (emp == "unemployed") + 0.2 * (purpose == "medical")
     y = (rs.rand(n) < sig(z)).astype(int)
     ids = ["LN-%06d" % (100000 + i * 7) for i in range(n)]
     df = pd.DataFrame({"app_id": ids, "employment": emp, "purpose": purpose, "income": income.round(0),
@@ -186,7 +186,7 @@ def data_posts(rs):
     rows = []
     for i in range(1400):
         t = topics[rs.randint(4)]
-        toks = [rs.choice(tw[t]) if rs.rand() < 0.5 else rs.choice(bg) for _ in range(22)]
+        toks = [rs.choice(tw[t]) if rs.rand() < 0.3 else rs.choice(bg) for _ in range(22)]
         rows.append(["d%05d" % i, " ".join(toks), t])
     return {"data/posts.csv": csv_bytes(pd.DataFrame(rows, columns=["doc_id", "text", "topic"]))}
 
@@ -194,14 +194,15 @@ def data_posts(rs):
 def data_wine(rs):
     d = 11
     w = rs.randn(d) * 0.5
+    scale, shift = rs.uniform(0.5, 3, d), rs.uniform(0, 10, d)
     def mk(n):
         X = rs.randn(n, d)
-        y = (rs.rand(n) < sig(X @ w * 0.9)).astype(int)
-        df = pd.DataFrame(X * rs.uniform(0.5, 3, d) + rs.uniform(0, 10, d), columns=
+        y = (rs.rand(n) < sig(X @ w * 0.7)).astype(int)
+        df = pd.DataFrame(X * scale + shift, columns=
                           ["acidity", "sugar", "chlorides", "so2_free", "so2_total", "density", "ph", "sulphates", "alcohol", "citric", "volatile"])
         df["good"] = y
         return df
-    return {"data/train.csv": csv_bytes(mk(500)), "data/test.csv": csv_bytes(mk(160))}
+    return {"data/train.csv": csv_bytes(mk(500)), "data/test.csv": csv_bytes(mk(120))}
 
 
 def data_calls(rs):
@@ -400,7 +401,7 @@ Output: `out/val_report.json`.
 
 ## Result
 
-Validation AUC, mean over 10 seeds: **@CLAIM@** (std across seeds about 0.002).
+Validation AUC, mean over 10 seeds: **@CLAIM@** (std across seeds below 0.001).
 The regularisation strength in `conf/exp.json` was set by hand and is not tuned per seed.
 ''',
         "conf/exp.json": json.dumps({"lr": 0.05, "epochs": 30, "batch": 32, "l2": 0.01, "init_scale": 0.1}, indent=2) + "\n",
@@ -1034,7 +1035,7 @@ physico-chemical measurements.
 
 ## Result
 
-Test accuracy: **@CLAIM@** (`test_accuracy` in `out/report.json`; 160 test wines).
+Test accuracy: **@CLAIM@** (`test_accuracy` in `out/report.json`; 120 test wines).
 ''',
         "wq/__init__.py": "",
         "wq/fit.py": r'''import argparse, json, os
@@ -1051,8 +1052,8 @@ def main():
     ap.add_argument("--train", required=True)
     ap.add_argument("--test", required=True)
     ap.add_argument("--report", default="out/report.json")
-    ap.add_argument("--epochs", type=int, default=60)
-    ap.add_argument("--lr", type=float, default=0.15)
+    ap.add_argument("--epochs", type=int, default=100)
+    ap.add_argument("--lr", type=float, default=0.6)
     ap.add_argument("--seed", type=int, default=2)
     a = ap.parse_args()
 
@@ -1174,3 +1175,222 @@ if __name__ == "__main__":
 
 
 CALLS_FIX = [("    te_eval = usable(te)\n", "    te_eval = te\n")]
+
+
+# ================================================================ task table
+def jk(path, key):
+    return (path, key)
+
+
+def probe_tickets(d):
+    p = pd.read_csv(os.path.join(d, "out/preds.csv"))
+    out = []
+    for c in ("escalated", "resolved"):
+        tp = ((p.outcome_true == c) & (p.outcome_pred == c)).sum()
+        fp = ((p.outcome_true != c) & (p.outcome_pred == c)).sum()
+        fn = ((p.outcome_true == c) & (p.outcome_pred != c)).sum()
+        out.append("F1(%s) recomputed from out/preds.csv = %.3f" % (c, 2 * tp / max(1, 2 * tp + fp + fn)))
+    return "; ".join(out)
+
+
+def probe_calls(d):
+    p = pd.read_csv(os.path.join(d, "outputs/predictions.csv"))
+    df = pd.read_csv(os.path.join(d, "data/calls.csv"))
+    m = p.merge(df[["clip_id", "species"]], on="clip_id", suffixes=("_pred", "_true"))
+    return "accuracy recomputed over all %d rows of outputs/predictions.csv = %.3f" % (len(m), (m.species_pred == m.species_true).mean())
+
+
+T = [
+    dict(id="bearing_fault", seed=1, category="control", data=data_sensor, repo=repo_sensor,
+         objective="Check whether this bearing-fault classifier really reaches the accuracy its README states, and tell me if anything makes that number untrustworthy.",
+         expect=[], allow=[], cmds=["python3 train.py --config configs/default.json"], metric=("results/metrics.json", "test_accuracy"),
+         why="Near-perfect accuracy is legitimate: the two regimes are 5 sigma apart on three of six channels (generator shifts them by 5.0), the scaler is fit on train only, train and test are separate generated files with no shared rows, and the README claim equals the printed value."),
+    dict(id="meter_events", seed=2, category="control", data=data_meter, repo=repo_meter,
+         objective="Reproduce the meter anomaly F1 from the README and look for evaluation problems in this repo.",
+         expect=[], allow=[], cmds=["python3 -m meterlab.cli run exp.json"], metric=("runs/exp_a/summary.json", "f1"),
+         why="The quantised logger data legitimately has many identical feature rows across train and test (documented in the README; about 1100 possible combinations for 3200 rows). Labels are stochastic given features, so duplicates are not label leakage; the scaler is fit on train only; the claim equals the printed value."),
+    dict(id="val_auc_seeds", seed=3, category="control", data=data_valnpz, repo=repo_valnpz,
+         objective="Our reproducibility reviewer wants to know whether the validation AUC reported for this logistic regression is honest and stable across runs.",
+         expect=[], allow=[], cmds=["python3 run_experiment.py --config conf/exp.json --seeds 10"], metric=("out/val_report.json", "val_auc_mean"),
+         why="Only validation AUC is reported and it is labelled val_auc in code, output and README (no test set exists in the repo). The number is a mean over 10 explicitly seeded runs (RandomState(s)), so it is exactly reproducible; hyperparameters are fixed in the config, not tuned on the validation labels at run time."),
+    dict(id="loan_default", seed=4, category="control", data=data_loan, repo=repo_loan,
+         objective="Audit this loan default baseline: is the high accuracy the README reports legitimate?",
+         expect=[], allow=[], cmds=["python3 scripts/run_loan.py --seed 11 --test-frac 0.25"], metric=("artifacts/metrics.json", "accuracy"),
+         why="prior_defaults is a legitimately strong, prediction-time feature (generator coefficient 3.2). app_id is excluded from the features; the split is a seeded random permutation with unique ids, scaler and one-hot vocabulary are built from train rows only; the claim equals the printed value."),
+    dict(id="adclick_te", seed=5, category="data_leakage", data=data_ads, repo=repo_ads,
+         fixes={"main.py": ADS_FIX}, cmds=["python3 main.py --csv data/clicks.csv --out reports/run.json"], metric=("reports/run.json", "test_accuracy"),
+         loc=("main.py", 'df["campaign_rate"] = df.groupby'), claim_from="bug",
+         objective="Our click model looks surprisingly good for such noisy data. Find out whether the reported accuracy is real.",
+         expect=["data.target_leak"], allow=[],
+         desc="The per-campaign click-rate feature is a mean of `clicked` over the whole dataset, computed before the train/test split, so every test row's own label (and those of other test rows) is baked into its feature; campaigns are mostly tiny so this nearly encodes the label"),
+    dict(id="readmit_rows", seed=6, category="data_leakage", data=data_patients, repo=repo_patients,
+         fixes={"experiments/data_utils.py": PAT_FIX}, cmds=["python3 experiments/run.py --config experiments/knn.json"], metric=("results/knn_k7.json", "auc"),
+         loc=("experiments/data_utils.py", "idx = np.random.RandomState(seed).permutation(len(df))"), claim_from="bug",
+         objective="We plan to deploy this readmission model on new patients. Does the offline AUC predict how it will do on patients it has never seen?",
+         expect=["data.train_test_overlap"], allow=[],
+         desc="The split permutes visit rows, so the same patient_id (with near-identical vitals across visits) is in both train and test; kNN effectively looks up the patient. The split should be grouped by patient_id"),
+    dict(id="churn_plans", seed=7, category="broken_preprocessing", data=data_plans, repo=repo_plans,
+         fixes={"churnlib/features.py": PLANS_FIX}, cmds=["python3 train.py", "python3 eval.py"], metric=("reports/test_metrics.json", "accuracy"),
+         loc=("churnlib/features.py", "pd.factorize(df[c])"), claim_from="fix",
+         objective="The churn model's holdout accuracy during training is much better than what the evaluation script gives on the test file. Figure out why.",
+         expect=["pipeline.eval_path_mismatch"], allow=["repro.claim_not_met"],
+         desc="One-hot columns are built from pd.factorize without sort, so category-to-column order is the order of first appearance in whichever file is encoded; train.csv and test.csv list plans and regions in different orders, so eval.py feeds the model permuted one-hot columns"),
+    dict(id="ticket_f1", seed=8, category="incorrect_metric", data=data_tickets, repo=repo_tickets,
+         fixes={"config.json": [('"pos_label": 1', '"pos_label": 0')]}, cmds=["python3 run.py --config config.json"], metric=("out/metrics.json", "f1"),
+         loc=("config.json", '"pos_label"'), claim_from="bug", probes=[probe_tickets],
+         objective="Verify the headline F1 for escalation prediction against the predictions the repo writes out.",
+         expect=["eval.metric_mismatch"], allow=[],
+         desc="F1 is computed for class index 1 (resolved, the majority) via pos_label=1, while the README and task are about the escalated class (index 0)"),
+    dict(id="lowdata_ckpt", seed=9, category="checkpoint_failure", data=data_overfit, repo=repo_ckpt,
+         fixes={"scripts/train.py": CKPT_FIX}, cmds=["python3 scripts/train.py --config configs/run.cfg", "python3 scripts/predict.py --config configs/run.cfg"],
+         metric=("runs/latest/metrics.json", "test_acc"), eff_from_probe=True, loc=("scripts/train.py", '"w": w, "b": b}'), claim_from="bug",
+         probes=[lambda d: "reload_metrics.json test_acc = %.3f" % json.load(open(os.path.join(d, "runs/latest/reload_metrics.json")))["test_acc"]],
+         objective="Make sure the saved best checkpoint of this small logistic regression can be used for inference and gives the accuracy we publish.",
+         expect=["ckpt.roundtrip_mismatch"], allow=[],
+         desc="The best-validation 'checkpoint' stores a reference to the weight array that is later updated in place, so ckpt/best.npz holds the final-epoch weights (overfit) rather than the best-epoch weights while the recorded test accuracy is from the best epoch"),
+    dict(id="topic_vocab", seed=10, category="reproducibility", data=data_posts, repo=repo_posts,
+         fixes={"run_nb.py": POSTS_FIX}, cmds=["python3 run_nb.py"], metric=("metrics/nb.json", "accuracy"),
+         loc=("run_nb.py", "vocab = list({t for t"), claim_from="fix", hashseeds=[1, 2, 3, 4, 5, 6],
+         objective="Colleagues get different topic-classifier accuracies from the same command. Investigate whether this experiment is reproducible.",
+         expect=["repro.nondeterministic"], allow=["repro.claim_not_met"],
+         desc="The capped vocabulary is taken as list(set(...))[:200], and set order of str depends on the per-process hash seed (PYTHONHASHSEED), so a different subset of tokens is kept on each run; the README says the 200 most frequent tokens are used"),
+    dict(id="wine_stop", seed=11, category="other", data=data_wine, repo=repo_wine,
+         fixes={"wq/fit.py": WINE_FIX}, cmds=["python3 -m wq.fit --train data/train.csv --test data/test.csv --report out/report.json"],
+         metric=("out/report.json", "test_accuracy"), loc=("wq/fit.py", "s = accuracy(Xte, yte, w, b)"), claim_from="bug",
+         objective="Review this wine-quality trainer for anything that would make its reported test accuracy optimistic.",
+         expect=["other:test_set_model_selection"], allow=["data.target_leak"],
+         desc="The epoch is chosen (and the reported number taken) as the maximum test accuracy over epochs, i.e. model selection on the test labels; no validation split exists"),
+    dict(id="birdcall_subset", seed=12, category="other", data=data_calls, repo=repo_calls,
+         fixes={"run.py": CALLS_FIX}, cmds=["python3 run.py config.json"], metric=("outputs/summary.json", "accuracy"),
+         loc=("run.py", "te_eval = usable(te)"), claim_from="bug", probes=[probe_calls],
+         objective="The README says accuracy on the test split. Check that the evaluation really covers the test split and is not biased.",
+         expect=["other:filtered_test_subset"], allow=["eval.metric_mismatch"],
+         desc="The headline accuracy is computed only on test recordings with snr_db >= 8 (usable(te)); the noisiest recordings, which the model gets wrong most, are silently dropped from the test set while predictions.csv covers all test rows"),
+]
+
+
+# ================================================================ build / run
+def build(t, fixed=False, claim="@CLAIM@"):
+    rs = np.random.RandomState(1000 + t["seed"])
+    files = {k: v.encode() for k, v in t["repo"]().items()}
+    files.update(t["data"](rs))
+    files["README.md"] = files["README.md"].replace(b"@CLAIM@", claim.encode())
+    if fixed:
+        for path, pairs in (t.get("fixes") or {}).items():
+            s = files[path].decode()
+            for old, new in pairs:
+                s = sub(s, old, new)
+            files[path] = s.encode()
+    return files
+
+
+def write_tree(root, files):
+    for p, b in files.items():
+        fp = os.path.join(root, p)
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        with open(fp, "wb") as f:
+            f.write(b)
+
+
+def run_in(t, files, scratch, hashseed=None):
+    d = tempfile.mkdtemp(prefix="h2_", dir=scratch)
+    write_tree(d, files)
+    env = dict(os.environ)
+    env.pop("PYTHONHASHSEED", None)
+    if hashseed is not None:
+        env["PYTHONHASHSEED"] = str(hashseed)
+    lines = []
+    for c in t["cmds"]:
+        r = subprocess.run(c, shell=True, cwd=d, env=env, capture_output=True, text=True, timeout=120)
+        if r.returncode:
+            raise RuntimeError("%s: %s\n%s" % (t["id"], c, r.stderr))
+        lines.append(r.stdout.strip().splitlines()[-1])
+    f, k = t["metric"]
+    val = json.load(open(os.path.join(d, f)))[k]
+    extra = [p(d) for p in t.get("probes", [])]
+    return d, val, lines, extra
+
+
+def main():
+    fixed_dir = None
+    if "--fixed" in sys.argv:
+        fixed_dir = os.path.abspath(sys.argv[sys.argv.index("--fixed") + 1])
+    scratch = os.environ.get("H2_SCRATCH") or tempfile.mkdtemp(prefix="h2_scratch_")
+    os.makedirs(scratch, exist_ok=True)
+    tasks_dir = os.path.join(HERE, "tasks")
+    if fixed_dir is None and os.path.isdir(tasks_dir):
+        shutil.rmtree(tasks_dir)
+
+    for t in T:
+        has_fix = bool(t.get("fixes"))
+        if fixed_dir:
+            root = os.path.join(fixed_dir, t["id"])
+            shutil.rmtree(root, ignore_errors=True)
+            claim = None
+        # claim calibration
+        src_fixed = t.get("claim_from") == "fix"
+        _, cv, _, _ = run_in(t, build(t, fixed=src_fixed), scratch, hashseed=0)
+        claim = "%.3f" % cv
+        if fixed_dir:
+            write_tree(root, build(t, fixed=True, claim=claim))
+            print("fixed copy", t["id"], claim)
+            continue
+
+        files = build(t, claim=claim)
+        ev = []
+        res = {}
+        if t["category"] == "control":
+            d, v, lines, extra = run_in(t, files, scratch)
+            ev.append("In a scratch copy ran `%s`: %s = %.4f (README claims %s)." % (" && ".join(t["cmds"]), t["metric"][1], v, claim))
+            ev.append("Stdout: " + " | ".join(lines))
+            d2, v2, _, _ = run_in(t, files, scratch)
+            ev.append("Second identical run: %.4f." % v2)
+            ev.append("Why clean: " + t["why"])
+            defect = "none"
+        else:
+            hs = t.get("hashseeds") or [None]
+            bug = []
+            for h in hs:
+                d, v, lines, extra = run_in(t, files, scratch, hashseed=h)
+                bug.append(v)
+                if h is None or h == hs[0]:
+                    first_lines, first_extra = lines, extra
+            ffiles = build(t, fixed=True, claim=claim)
+            fv = []
+            for h in (hs[:2] if t.get("hashseeds") else [None]):
+                d, v, flines, fextra = run_in(t, ffiles, scratch, hashseed=h)
+                fv.append(v)
+            fixed_v = fv[0]
+            ev.append("Followed README in a scratch copy (`%s`); README claim = %s." % (" && ".join(t["cmds"]), claim))
+            if t.get("hashseeds"):
+                ev.append("Buggy %s over PYTHONHASHSEED=%s: %s (spread %.3f)." % (t["metric"][1], hs, ", ".join("%.3f" % x for x in bug), max(bug) - min(bug)))
+                ev.append("Fixed copy, PYTHONHASHSEED=%s: %s." % (hs[:2], ", ".join("%.3f" % x for x in fv)))
+                eff = "%.3f-%.3f across runs vs %.3f fixed (spread %.3f)" % (min(bug), max(bug), fixed_v, max(bug) - min(bug))
+            else:
+                ev.append("Buggy %s = %.4f; stdout: %s" % (t["metric"][1], bug[0], " | ".join(first_lines)))
+                ev.append("Fixed copy %s = %.4f; stdout: %s" % (t["metric"][1], fixed_v, " | ".join(flines)))
+                eff = "%s %.3f buggy vs %.3f fixed (delta %+.3f)" % (t["metric"][1], bug[0], fixed_v, bug[0] - fixed_v)
+            if t.get("eff_from_probe"):
+                eff = "headline %s %.3f in both copies, but after save/reload the buggy copy gives [%s] vs fixed [%s]" % (t["metric"][1], bug[0], first_extra[0], fextra[0])
+            for e in first_extra:
+                ev.append("Buggy probe: " + e)
+            for e in fextra:
+                ev.append("Fixed probe: " + e)
+            path, snip = t["loc"]
+            line = next(i + 1 for i, l in enumerate(files[path].decode().splitlines()) if snip in l)
+            defect = "%s (%s:%d). Measured: %s." % (t["desc"], path, line, eff)
+
+        root = os.path.join(tasks_dir, t["id"])
+        write_tree(os.path.join(root, "repo"), files)
+        tj = {"id": t["id"], "category": t["category"], "objective": t["objective"], "expect": t["expect"], "allow": t["allow"],
+              "canaries": [], "defect": defect, "evidence": " ".join(ev)}
+        with open(os.path.join(root, "task.json"), "w") as f:
+            json.dump(tj, f, indent=2)
+            f.write("\n")
+        print(t["id"], t["category"], claim, "|", " ".join(ev)[:230])
+    if not fixed_dir:
+        shutil.rmtree(scratch, ignore_errors=True) if not os.environ.get("H2_SCRATCH") else None
+
+
+if __name__ == "__main__":
+    main()

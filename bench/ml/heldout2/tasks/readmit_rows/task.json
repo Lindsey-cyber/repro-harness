@@ -1,0 +1,12 @@
+{
+  "id": "readmit_rows",
+  "category": "data_leakage",
+  "objective": "We plan to deploy this readmission model on new patients. Does the offline AUC predict how it will do on patients it has never seen?",
+  "expect": [
+    "data.train_test_overlap"
+  ],
+  "allow": [],
+  "canaries": [],
+  "defect": "The split permutes visit rows, so the same patient_id (with near-identical vitals across visits) is in both train and test; kNN effectively looks up the patient. The split should be grouped by patient_id (experiments/data_utils.py:12). Measured: auc 0.836 buggy vs 0.568 fixed (delta +0.267).",
+  "evidence": "Followed README in a scratch copy (`python3 experiments/run.py --config experiments/knn.json`); README claim = 0.836. Buggy auc = 0.8357; stdout: auc 0.8357 Fixed copy auc = 0.5683; stdout: auc 0.5683"
+}

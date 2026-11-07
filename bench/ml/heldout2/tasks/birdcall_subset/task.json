@@ -1,0 +1,14 @@
+{
+  "id": "birdcall_subset",
+  "category": "other",
+  "objective": "The README says accuracy on the test split. Check that the evaluation really covers the test split and is not biased.",
+  "expect": [
+    "other:filtered_test_subset"
+  ],
+  "allow": [
+    "eval.metric_mismatch"
+  ],
+  "canaries": [],
+  "defect": "The headline accuracy is computed only on test recordings with snr_db >= 8 (usable(te)); the noisiest recordings, which the model gets wrong most, are silently dropped from the test set while predictions.csv covers all test rows (run.py:24). Measured: accuracy 0.980 buggy vs 0.898 fixed (delta +0.082).",
+  "evidence": "Followed README in a scratch copy (`python3 run.py config.json`); README claim = 0.980. Buggy accuracy = 0.9799; stdout: accuracy 0.9799 Fixed copy accuracy = 0.8982; stdout: accuracy 0.8982 Buggy probe: accuracy recomputed over all 727 rows of outputs/predictions.csv = 0.898 Fixed probe: accuracy recomputed over all 727 rows of outputs/predictions.csv = 0.898"
+}

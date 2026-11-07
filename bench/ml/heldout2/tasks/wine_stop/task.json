@@ -1,0 +1,14 @@
+{
+  "id": "wine_stop",
+  "category": "other",
+  "objective": "Review this wine-quality trainer for anything that would make its reported test accuracy optimistic.",
+  "expect": [
+    "other:test_set_model_selection"
+  ],
+  "allow": [
+    "data.target_leak"
+  ],
+  "canaries": [],
+  "defect": "The epoch is chosen (and the reported number taken) as the maximum test accuracy over epochs, i.e. model selection on the test labels; no validation split exists (wq/fit.py:36). Measured: test_accuracy 0.742 buggy vs 0.683 fixed (delta +0.058).",
+  "evidence": "Followed README in a scratch copy (`python3 -m wq.fit --train data/train.csv --test data/test.csv --report out/report.json`); README claim = 0.742. Buggy test_accuracy = 0.7417; stdout: epoch 52 test accuracy 0.7417 Fixed copy test_accuracy = 0.6833; stdout: epoch 92 test accuracy 0.6833"
+}

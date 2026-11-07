@@ -1,0 +1,7 @@
+{
+  "csv": "data/calls.csv",
+  "label": "species",
+  "epochs": 400,
+  "lr": 0.3,
+  "outputs": "outputs"
+}

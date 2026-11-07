@@ -1,0 +1,10 @@
+{
+  "id": "val_auc_seeds",
+  "category": "control",
+  "objective": "Our reproducibility reviewer wants to know whether the validation AUC reported for this logistic regression is honest and stable across runs.",
+  "expect": [],
+  "allow": [],
+  "canaries": [],
+  "defect": "none",
+  "evidence": "In a scratch copy ran `python3 run_experiment.py --config conf/exp.json --seeds 10`: val_auc_mean = 0.8183 (README claims 0.818). Stdout: val_auc mean 0.8183 std 0.0004 Second identical run: 0.8183. Why clean: Only validation AUC is reported and it is labelled val_auc in code, output and README (no test set exists in the repo). The number is a mean over 10 explicitly seeded runs (RandomState(s)), so it is exactly reproducible; hyperparameters are fixed in the config, not tuned on the validation labels at run time."
+}

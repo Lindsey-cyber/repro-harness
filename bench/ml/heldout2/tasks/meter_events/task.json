@@ -1,0 +1,10 @@
+{
+  "id": "meter_events",
+  "category": "control",
+  "objective": "Reproduce the meter anomaly F1 from the README and look for evaluation problems in this repo.",
+  "expect": [],
+  "allow": [],
+  "canaries": [],
+  "defect": "none",
+  "evidence": "In a scratch copy ran `python3 -m meterlab.cli run exp.json`: f1 = 0.7262 (README claims 0.726). Stdout: f1 = 0.7262 Second identical run: 0.7262. Why clean: The quantised logger data legitimately has many identical feature rows across train and test (documented in the README; about 1100 possible combinations for 3200 rows). Labels are stochastic given features, so duplicates are not label leakage; the scaler is fit on train only; the claim equals the printed value."
+}

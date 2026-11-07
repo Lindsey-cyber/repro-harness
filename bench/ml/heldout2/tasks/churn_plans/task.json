@@ -1,0 +1,14 @@
+{
+  "id": "churn_plans",
+  "category": "broken_preprocessing",
+  "objective": "The churn model's holdout accuracy during training is much better than what the evaluation script gives on the test file. Figure out why.",
+  "expect": [
+    "pipeline.eval_path_mismatch"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "One-hot columns are built from pd.factorize without sort, so category-to-column order is the order of first appearance in whichever file is encoded; train.csv and test.csv list plans and regions in different orders, so eval.py feeds the model permuted one-hot columns (churnlib/features.py:11). Measured: accuracy 0.587 buggy vs 0.750 fixed (delta -0.163).",
+  "evidence": "Followed README in a scratch copy (`python3 train.py && python3 eval.py`); README claim = 0.750. Buggy accuracy = 0.5871; stdout: holdout accuracy 0.7367 | test accuracy 0.5871 Fixed copy accuracy = 0.7500; stdout: holdout accuracy 0.7367 | test accuracy 0.7500"
+}

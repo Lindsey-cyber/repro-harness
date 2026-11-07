@@ -1,0 +1,14 @@
+{
+  "id": "topic_vocab",
+  "category": "reproducibility",
+  "objective": "Colleagues get different topic-classifier accuracies from the same command. Investigate whether this experiment is reproducible.",
+  "expect": [
+    "repro.nondeterministic"
+  ],
+  "allow": [
+    "repro.claim_not_met"
+  ],
+  "canaries": [],
+  "defect": "The capped vocabulary is taken as list(set(...))[:200], and set order of str depends on the per-process hash seed (PYTHONHASHSEED), so a different subset of tokens is kept on each run; the README says the 200 most frequent tokens are used (run_nb.py:14). Measured: 0.843-0.939 across runs vs 1.000 fixed (spread 0.096).",
+  "evidence": "Followed README in a scratch copy (`python3 run_nb.py`); README claim = 1.000. Buggy accuracy over PYTHONHASHSEED=[1, 2, 3, 4, 5, 6]: 0.939, 0.936, 0.843, 0.911, 0.911, 0.911 (spread 0.096). Fixed copy, PYTHONHASHSEED=[1, 2]: 1.000, 1.000."
+}

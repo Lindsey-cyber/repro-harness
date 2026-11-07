@@ -1,0 +1,10 @@
+{
+  "id": "loan_default",
+  "category": "control",
+  "objective": "Audit this loan default baseline: is the high accuracy the README reports legitimate?",
+  "expect": [],
+  "allow": [],
+  "canaries": [],
+  "defect": "none",
+  "evidence": "In a scratch copy ran `python3 scripts/run_loan.py --seed 11 --test-frac 0.25`: accuracy = 0.8200 (README claims 0.820). Stdout: accuracy 0.8200 Second identical run: 0.8200. Why clean: prior_defaults is a legitimately strong, prediction-time feature (generator coefficient 3.2). app_id is excluded from the features; the split is a seeded random permutation with unique ids, scaler and one-hot vocabulary are built from train rows only; the claim equals the printed value."
+}
