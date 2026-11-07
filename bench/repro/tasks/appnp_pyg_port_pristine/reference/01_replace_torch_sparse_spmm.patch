@@ -1,0 +1,16 @@
+diff --git a/src/appnp_layer.py b/src/appnp_layer.py
+index 3105895..889f7e9 100644
+--- a/src/appnp_layer.py
++++ b/src/appnp_layer.py
+@@ -2,7 +2,10 @@
+ 
+ import math
+ import torch
+-from torch_sparse import spmm
++
++def spmm(index, value, m, n, matrix):
++    """Sparse (m x n) @ dense matrix, replacement for torch_sparse.spmm."""
++    return torch.sparse.mm(torch.sparse_coo_tensor(index, value, (m, n)), matrix)
+ from utils import create_propagator_matrix
+ 
+ def uniform(size, tensor):

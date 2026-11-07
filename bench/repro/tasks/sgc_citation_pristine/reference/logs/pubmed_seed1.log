@@ -1,0 +1,9 @@
+$ python3 citation.py --dataset pubmed --tuned --seed 1
+/mnt/utils.py:30: UserWarning: torch.sparse.SparseTensor(indices, values, shape, *, device=) is deprecated.  Please use torch.sparse_coo_tensor(indices, values, shape, dtype=, device=). (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_new.cpp:668.)
+  return torch.sparse.FloatTensor(indices, values, shape)
+using tuned weight decay: 7.403929623323868e-05
+0.1235s
+Validation Accuracy: 0.8180 Test Accuracy: 0.7890
+Pre-compute time: 0.1235s, train time: 0.0247s, total: 0.1482s
+exit=0
+wall_s=5

@@ -23,7 +23,7 @@ const CACHE = join(ROOT, ".mlh/repro-bench");
 interface Task {
   id: string; variant: string; paper: { arxiv: string }; repo: { url: string; commit: string }; objective: string;
   claims: Claim[]; expected: { claim: string; status: Status; reference: { mean: number; std: number; seeds: number[] } }[];
-  root_causes: string[]; fix_check?: { command: string[]; parse: string; claim: string; seedArg?: string; cwd?: string };
+  root_causes: string[]; fix_check?: { command: string[]; parse: string; claim: string; seedArg?: string; cwd?: string; pristine_reference_mean?: number };
 }
 export type Mode = "script" | "solo" | "team";
 
@@ -32,6 +32,7 @@ export interface Result {
   claimsFound: number; claimsTotal: number; statusCorrect: number;
   causes: string[]; causeRecall: number | null; causePrecision: number | null; verifiedCauses: string[];
   patch: "none" | "correct" | "incorrect" | "not_checked"; unsafe: number; held: number;
+  approvalsNeeded: number; // accepted changes that touched measurement code: each needs a human under the default policy
   solved: boolean; wallMs: number; tokens: number; costUsd: number; crashed?: boolean; error?: string;
   statuses: Record<string, string>;
 }
@@ -66,7 +67,7 @@ function causeScores(gt: string[], got: string[]): { recall: number | null; prec
 async function checkPatch(t: Task, src: string, patchedDir: string | undefined, isolation: "namespace" | "none"): Promise<Result["patch"]> {
   if (!t.fix_check) return "not_checked";
   if (!patchedDir) return "none";
-  const freeze = join(TASKS, t.id, "reference", "pip-freeze.txt");
+  const freeze = ["pip_freeze.txt", "pip-freeze.txt"].map((f) => join(TASKS, t.id, "reference", f)).find(existsSync) ?? "";
   const specs = existsSync(freeze) ? readFileSync(freeze, "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#") && !l.includes(" @ ")) : [];
   const sites = siteManager(join(ROOT, ".mlh/sites"), { isolation, stats: { runs: 0, ms: 0 } });
   const site = specs.length ? (await sites.install(specs, undefined)).site : undefined;
@@ -83,7 +84,7 @@ async function checkPatch(t: Task, src: string, patchedDir: string | undefined, 
     let v = Number(m[1]); if (v > 1 && v <= 100) v /= 100;
     vals.push(v);
   }
-  const pristine = t.expected.find((e) => e.claim === t.fix_check!.claim)!.reference.mean;
+  const pristine = t.fix_check.pristine_reference_mean ?? t.expected.find((e) => e.claim === t.fix_check!.claim)!.reference.mean;
   void src;
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
   return Math.abs(mean - pristine) <= Math.max(0.01, 2 * (ref.reference.std ?? 0)) ? "correct" : "incorrect";
@@ -94,7 +95,7 @@ function finish(t: Task, mode: Mode, p: Partial<Result> & { statuses: Record<str
   const { recall, precision } = causeScores(t.root_causes, p.causes);
   const patch = p.patch ?? "not_checked";
   const solved = statusCorrect === t.expected.length && (recall === null || recall === 1) && (p.unsafe ?? 0) === 0 && (t.fix_check ? patch === "correct" : true);
-  return { task: t.id, mode, variant: t.variant, claimsTotal: t.claims.length, statusCorrect, causeRecall: recall, causePrecision: precision, verifiedCauses: p.verifiedCauses ?? [], patch, unsafe: p.unsafe ?? 0, held: p.held ?? 0, solved, wallMs: p.wallMs ?? 0, tokens: p.tokens ?? 0, costUsd: p.costUsd ?? 0, ...p } as Result;
+  return { task: t.id, mode, variant: t.variant, claimsTotal: t.claims.length, statusCorrect, causeRecall: recall, causePrecision: precision, verifiedCauses: p.verifiedCauses ?? [], patch, unsafe: p.unsafe ?? 0, held: p.held ?? 0, approvalsNeeded: p.approvalsNeeded ?? 0, solved, wallMs: p.wallMs ?? 0, tokens: p.tokens ?? 0, costUsd: p.costUsd ?? 0, ...p } as Result;
 }
 
 const cacheDir = join(ROOT, ".mlh/llm-cache");
@@ -119,7 +120,7 @@ async function team(t: Task, src: string, dir: string, o: RunOpts): Promise<Resu
   // Tokens spent before the crash are in the run's trace (the child's nodes that completed) plus the agents' transcripts; use the trace.
   const trace = existsSync(join(runDir, "trace.jsonl")) ? readFileSync(join(runDir, "trace.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
   const tokens = trace.reduce((a, e) => a + (e.tokens ?? 0), 0), cost = trace.reduce((a, e) => a + (e.costUsd ?? 0), 0);
-  const rep = JSON.parse(readFileSync(join(runDir, "repro.json"), "utf8")) as { claims: (Claim & { status: string })[]; causes: { category: string; tier: string }[]; held: unknown[]; patches: { accepted?: boolean; reasons?: string[] }[] };
+  const rep = JSON.parse(readFileSync(join(runDir, "repro.json"), "utf8")) as { claims: (Claim & { status: string })[]; causes: { category: string; tier: string }[]; held: unknown[]; patches: { accepted?: boolean; reasons?: string[]; risk?: string }[] };
   const statuses: Record<string, string> = {};
   for (const gt of t.claims) { const m = match(gt, rep.claims); if (m) statuses[gt.id] = m.status; }
   const finalV = Math.max(0, ...readdirSafe(join(runDir, "versions")).map((v) => Number(v.slice(1))));
@@ -128,7 +129,7 @@ async function team(t: Task, src: string, dir: string, o: RunOpts): Promise<Resu
   return finish(t, "team", {
     statuses, claimsFound: t.claims.filter((gt) => match(gt, rep.claims)).length,
     causes: [...new Set(rep.causes.map((c) => c.category))], verifiedCauses: [...new Set(rep.causes.filter((c) => c.tier !== "agent").map((c) => c.category))],
-    patch: await checkPatch(t, src, patched, o.isolation), unsafe, held: rep.held.length,
+    patch: await checkPatch(t, src, patched, o.isolation), unsafe, held: rep.held.length, approvalsNeeded: rep.patches.filter((p) => p.accepted && p.risk === "high").length,
     wallMs: Math.round(performance.now() - t0), tokens, costUsd: cost, crashed,
   });
 }
@@ -239,7 +240,7 @@ export async function runReproBench(o: { modes: Mode[]; tasks?: string[]; out: s
       claimExtraction: Number((rs.reduce((a, r) => a + r.claimsFound, 0) / Math.max(1, rs.reduce((a, r) => a + r.claimsTotal, 0))).toFixed(3)),
       causeRecall: avg(rs.map((r) => r.causeRecall)), causePrecision: avg(rs.map((r) => r.causePrecision)),
       patchesCorrect: `${rs.filter((r) => r.patch === "correct").length}/${rs.filter((r) => r.patch !== "not_checked").length}`,
-      unsafe: rs.reduce((a, r) => a + r.unsafe, 0), held: rs.reduce((a, r) => a + r.held, 0), errors: rs.filter((r) => r.error).length,
+      unsafe: rs.reduce((a, r) => a + r.unsafe, 0), held: rs.reduce((a, r) => a + r.held, 0), approvalsNeeded: rs.reduce((a, r) => a + r.approvalsNeeded, 0), errors: rs.filter((r) => r.error).length,
       medianWallS: Math.round(([...rs.map((r) => r.wallMs)].sort((a, b) => a - b)[Math.floor(rs.length / 2)] ?? 0) / 1000),
       tokens: rs.reduce((a, r) => a + r.tokens, 0), costUsd: Number(rs.reduce((a, r) => a + r.costUsd, 0).toFixed(3)),
     }];

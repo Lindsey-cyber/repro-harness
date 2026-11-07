@@ -1,0 +1,3 @@
+Environment: python 3.13, site dir built with `tools/sbx.sh bench/repro/.cache --site bench/repro/.cache/site-torch --net -- python3 -m pip install --target /opt torch --index-url https://download.pytorch.org/whl/cpu` then `... pip install --target /opt numpy scipy scikit-learn psutil pandas texttable tqdm` (see pip_freeze.txt). Runs: `tools/sbx.sh <workdir> --site <site> -- <cmd>` (no network, 1 thread, workdir = clone at repo.commit + patches).
+
+Commands (seed S in 0 1 2, patch 01): python3 src/main.py --model exact --seed S ; python3 src/main.py --model approximate --seed S ; parse 'Test accuracy: X'.

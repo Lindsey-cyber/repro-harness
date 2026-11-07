@@ -1,0 +1,5 @@
+$ sh -c cd pygcn && PYTHONPATH=/opt:/mnt python3 train.py --no-cuda --seed 0
+/mnt/pygcn/utils.py:80: UserWarning: torch.sparse.SparseTensor(indices, values, shape, *, device=) is deprecated.  Please use torch.sparse_coo_tensor(indices, values, shape, dtype=, device=). (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_new.cpp:668.)
+  return torch.sparse.FloatTensor(indices, values, shape)
+exit=124
+wall_s=120

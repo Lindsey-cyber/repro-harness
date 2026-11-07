@@ -1,0 +1,11 @@
+$ python3 citation.py --dataset citeseer --tuned --seed 0 --epochs 150
+/mnt/normalization.py:24: RuntimeWarning: divide by zero encountered in power
+  r_inv = np.power(rowsum, -1).flatten()
+/mnt/utils.py:30: UserWarning: torch.sparse.SparseTensor(indices, values, shape, *, device=) is deprecated.  Please use torch.sparse_coo_tensor(indices, values, shape, dtype=, device=). (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_new.cpp:668.)
+  return torch.sparse.FloatTensor(indices, values, shape)
+using tuned weight decay: 2.3545587233182368e-05
+0.1403s
+Validation Accuracy: 0.7280 Test Accuracy: 0.7180
+Pre-compute time: 0.1403s, train time: 0.1461s, total: 0.2864s
+exit=0
+wall_s=5

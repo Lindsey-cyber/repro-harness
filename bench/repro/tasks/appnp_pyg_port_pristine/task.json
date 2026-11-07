@@ -1,0 +1,81 @@
+{
+  "id": "appnp_pyg_port_pristine",
+  "variant": "pristine",
+  "paper": {
+    "arxiv": "1810.05997",
+    "title": "Predict then Propagate: Graph Neural Networks meet Personalized PageRank"
+  },
+  "repo": {
+    "url": "https://github.com/benedekrozemberczki/APPNP",
+    "commit": "338d98980ee8748e652630dd422341ef8b2a354a"
+  },
+  "objective": "Using this PyTorch implementation on its bundled Cora data, reproduce the Cora-ML test accuracy of PPNP (exact model) and APPNP (approximate model) in Table 2.",
+  "claims": [
+    {
+      "id": "ppnp_cora_ml",
+      "table": "Table 2",
+      "dataset": "Cora-ML",
+      "method": "PPNP",
+      "metric": "accuracy",
+      "value": 0.8529,
+      "std": 0.0025
+    },
+    {
+      "id": "appnp_cora_ml",
+      "table": "Table 2",
+      "dataset": "Cora-ML",
+      "method": "APPNP",
+      "metric": "accuracy",
+      "value": 0.8509,
+      "std": 0.0025
+    }
+  ],
+  "expected": [
+    {
+      "claim": "ppnp_cora_ml",
+      "status": "not_reproduced",
+      "reference": {
+        "mean": 0.8973,
+        "std": 0.0101,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.896,
+          0.908,
+          0.888
+        ],
+        "tol": 0.0116
+      },
+      "why": "Runs (after replacing torch_sparse) but the repo uses plain Cora, a random 1500/500/rest split with 1500 labelled nodes, not the paper's Cora-ML with 20 labels per class; accuracy is about 0.90."
+    },
+    {
+      "claim": "appnp_cora_ml",
+      "status": "not_reproduced",
+      "reference": {
+        "mean": 0.894,
+        "std": 0.0072,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.888,
+          0.902,
+          0.892
+        ],
+        "tol": 0.01
+      },
+      "why": "Same protocol difference, with `--model approximate`; about 0.89."
+    }
+  ],
+  "root_causes": [
+    "env.missing_dependency",
+    "protocol.mismatch"
+  ],
+  "fix_check": null,
+  "notes": "Table 2 of arXiv 1810.05997 (pdftotext): 'PPNP*  75.83 \u00b1 0.27  85.29 \u00b1 0.25  -' and 'APPNP  75.73 \u00b1 0.30  85.09 \u00b1 0.25  79.73 \u00b1 0.31' (columns Citeseer, Cora-ML, PubMed, MS Academic; average accuracy %, 95% confidence by bootstrapping; the Cora-ML column is the second). The repo's README requires torch-scatter/torch-sparse/torch-geometric 2019 builds; torch_sparse cannot be built here, and only `spmm` is used -> patch 01 reimplements it with torch.sparse.mm. Run from the repo root: python3 src/main.py --model exact|approximate --seed S (default model is exact = PPNP; ~4 min/seed exact, ~1 min approximate)."
+}

@@ -1,0 +1,73 @@
+{
+  "id": "sgc_citation_inj_evalpath",
+  "variant": "injected",
+  "paper": {
+    "arxiv": "1902.07153",
+    "title": "Simplifying Graph Convolutional Networks"
+  },
+  "repo": {
+    "url": "https://github.com/Tiiiger/SGC",
+    "commit": "2c7a2727e82e462d8ef9d6e57f0b08888e16488f"
+  },
+  "objective": "Reproduce the SGC test accuracy on Cora reported in Table 2 of the paper, using this repository's tuned-hyperparameter command for Cora.",
+  "claims": [
+    {
+      "id": "cora_acc",
+      "table": "Table 2",
+      "dataset": "Cora",
+      "method": "SGC",
+      "metric": "accuracy",
+      "value": 0.81,
+      "std": 0.0
+    }
+  ],
+  "expected": [
+    {
+      "claim": "cora_acc",
+      "status": "reproduced",
+      "reference": {
+        "mean": 0.8103,
+        "std": 0.0006,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.81,
+          0.811,
+          0.81
+        ],
+        "tol": 0.01
+      },
+      "why": "After the defect is found and removed the pristine behaviour is restored and the number matches.",
+      "buggy": {
+        "values": [
+          0.698,
+          0.696,
+          0.697
+        ],
+        "note": "deflated: test accuracy ~0.70 on all seeds while validation accuracy still reads 0.794"
+      }
+    }
+  ],
+  "root_causes": [
+    "env.missing_dependency",
+    "pipeline.eval_path_mismatch"
+  ],
+  "fix_check": {
+    "command": [
+      "python3",
+      "citation.py",
+      "--dataset",
+      "cora",
+      "--tuned",
+      "--seed",
+      "{seed}"
+    ],
+    "parse": "Test Accuracy: ([0-9.]+)",
+    "claim": "cora_acc",
+    "pristine_reference_mean": 0.8103
+  },
+  "notes": "Table 2 of arXiv 1902.07153 (pdftotext line): 'SGC        81.0 \u00b1 0.0      71.9 \u00b1 0.1      78.9 \u00b1 0.0' (columns Cora, Citeseer, Pubmed; caption: Test accuracy (%) averaged over 10 runs on citation networks). `{seed}` in fix_check.command is the placeholder for each reference seed. Expected status is the status after the injected defect is correctly diagnosed and removed; the buggy numbers are recorded under expected[].buggy. Silent defect: validation accuracy is unchanged (0.794), only the test number is wrong."
+}

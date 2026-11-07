@@ -1,0 +1,51 @@
+{
+  "id": "gcnii_cora_pristine",
+  "variant": "pristine",
+  "paper": {
+    "arxiv": "2007.02133",
+    "title": "Simple and Deep Graph Convolutional Networks"
+  },
+  "repo": {
+    "url": "https://github.com/chennnM/GCNII",
+    "commit": "ca91f5686c4cd09cc1c6f98431a5d5b7e36acc92"
+  },
+  "objective": "Reproduce the semi-supervised Cora test accuracy of GCNII (64 layers) reported in Table 2, using the repository's semi.sh command for Cora.",
+  "claims": [
+    {
+      "id": "cora_acc",
+      "table": "Table 2",
+      "dataset": "Cora",
+      "method": "GCNII (64 layers)",
+      "metric": "accuracy",
+      "value": 0.855,
+      "std": 0.005
+    }
+  ],
+  "expected": [
+    {
+      "claim": "cora_acc",
+      "status": "reproduced",
+      "reference": {
+        "mean": 0.8537,
+        "std": 0.0045,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.849,
+          0.854,
+          0.858
+        ],
+        "tol": 0.01
+      },
+      "why": "Reproduces after making the device selection CPU-capable; about 8-10 minutes per seed on one CPU thread."
+    }
+  ],
+  "root_causes": [
+    "other:hardcoded_cuda"
+  ],
+  "fix_check": null,
+  "notes": "Table 2 of arXiv 2007.02133 (pdftotext): 'GCNII  85.5 \u00b1 0.5 (64)  73.4 \u00b1 0.6 (32)  80.2 \u00b1 0.4 (16)' (Cora, Citeseer, Pubmed; accuracy %). semi.sh first line: `python -u train.py --data cora --layer 64 --test`. Test accuracy is printed as 'Test acc.:85.1' (percent). torch.device('cuda:0') is hard-coded -> patch 01. Reference command: python3 train.py --data cora --layer 64 --test --seed S."
+}

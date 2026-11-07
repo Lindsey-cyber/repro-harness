@@ -1,0 +1,109 @@
+{
+  "id": "sgc_citation_pristine",
+  "variant": "pristine",
+  "paper": {
+    "arxiv": "1902.07153",
+    "title": "Simplifying Graph Convolutional Networks"
+  },
+  "repo": {
+    "url": "https://github.com/Tiiiger/SGC",
+    "commit": "2c7a2727e82e462d8ef9d6e57f0b08888e16488f"
+  },
+  "objective": "Reproduce the SGC test accuracy on Cora, Citeseer and Pubmed reported in Table 2 of the paper, using this repository's tuned-hyperparameter commands for the citation networks.",
+  "claims": [
+    {
+      "id": "cora_acc",
+      "table": "Table 2",
+      "dataset": "Cora",
+      "method": "SGC",
+      "metric": "accuracy",
+      "value": 0.81,
+      "std": 0.0
+    },
+    {
+      "id": "citeseer_acc",
+      "table": "Table 2",
+      "dataset": "Citeseer",
+      "method": "SGC",
+      "metric": "accuracy",
+      "value": 0.719,
+      "std": 0.001
+    },
+    {
+      "id": "pubmed_acc",
+      "table": "Table 2",
+      "dataset": "Pubmed",
+      "method": "SGC",
+      "metric": "accuracy",
+      "value": 0.789,
+      "std": 0.0
+    }
+  ],
+  "expected": [
+    {
+      "claim": "cora_acc",
+      "status": "reproduced",
+      "reference": {
+        "mean": 0.8103,
+        "std": 0.0006,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.81,
+          0.811,
+          0.81
+        ],
+        "tol": 0.01
+      },
+      "why": "Runs as documented (`citation.py --dataset cora --tuned`) once scikit-learn is installed; the repo's requirements file cannot be installed as written. Accuracy is essentially seed independent."
+    },
+    {
+      "claim": "citeseer_acc",
+      "status": "reproduced",
+      "reference": {
+        "mean": 0.718,
+        "std": 0.001,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.718,
+          0.717,
+          0.719
+        ],
+        "tol": 0.01
+      },
+      "why": "README command uses `--epochs 150` for Citeseer; with it the number matches."
+    },
+    {
+      "claim": "pubmed_acc",
+      "status": "reproduced",
+      "reference": {
+        "mean": 0.789,
+        "std": 0.0,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.789,
+          0.789,
+          0.789
+        ],
+        "tol": 0.01
+      },
+      "why": "Matches as documented."
+    }
+  ],
+  "root_causes": [
+    "env.missing_dependency"
+  ],
+  "fix_check": null,
+  "notes": "Table 2 of arXiv 1902.07153 (pdftotext line): 'SGC        81.0 \u00b1 0.0      71.9 \u00b1 0.1      78.9 \u00b1 0.0' (columns Cora, Citeseer, Pubmed; caption: Test accuracy (%) averaged over 10 runs on citation networks). README: `pip install -r requirement.txt` (the file is named requirements.txt) which pins networkx==1.11 and hyperopt==0.1.1 (not installable on python 3.13); scikit-learn is imported by metrics.py. Fix = install scikit-learn; no source patch needed (networkx 3.x and torch 2.x work as is, with deprecation warnings). Seeds are passed with `--seed`."
+}

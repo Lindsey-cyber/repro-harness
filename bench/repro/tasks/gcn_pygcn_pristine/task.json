@@ -1,0 +1,56 @@
+{
+  "id": "gcn_pygcn_pristine",
+  "variant": "pristine",
+  "paper": {
+    "arxiv": "1609.02907",
+    "title": "Semi-Supervised Classification with Graph Convolutional Networks"
+  },
+  "repo": {
+    "url": "https://github.com/tkipf/pygcn",
+    "commit": "1600b5b748b3976413d1e307540ccc62605b4d6d"
+  },
+  "objective": "Reproduce, using this repository, the Cora test accuracy of the GCN in the 'GCN (rand. splits)' row of Table 2.",
+  "claims": [
+    {
+      "id": "cora_rand_acc",
+      "table": "Table 2",
+      "dataset": "Cora",
+      "method": "GCN (rand. splits)",
+      "metric": "accuracy",
+      "value": 0.801,
+      "std": 0.005
+    }
+  ],
+  "expected": [
+    {
+      "claim": "cora_rand_acc",
+      "status": "not_reproduced",
+      "reference": {
+        "mean": 0.8244,
+        "std": 0.0121,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "values": [
+          0.839,
+          0.814,
+          0.817,
+          0.836,
+          0.816
+        ],
+        "tol": 0.0108
+      },
+      "why": "The code runs fine but is a re-implementation with its own fixed split (140 train / 300 val / 1000 test taken from cora.content order) and no random-split evaluation; its test accuracy (about 0.82-0.84) is above the paper's number and outside tolerance. The README itself says it is not intended for reproduction of the paper's results.",
+      "note": "runs vary by about 0.01-0.02 between repeats even with the same --seed (sparse ops), hence 5 seeds are recorded"
+    }
+  ],
+  "root_causes": [
+    "protocol.mismatch"
+  ],
+  "fix_check": null,
+  "notes": "Table 2 of arXiv 1609.02907 (pdftotext): 'GCN (this paper)  70.3 (7s)  81.5 (4s)  79.0 (38s)  66.0 (48s)' and 'GCN (rand. splits)  67.9 \u00b1 0.5  80.1 \u00b1 0.5  78.9 \u00b1 0.7  58.4 \u00b1 1.7' (columns Citeseer, Cora, Pubmed, NELL). The claim here is the Cora entry of the 'GCN (rand. splits)' row. Run from the pygcn/ package directory with the repo root on PYTHONPATH (`cd pygcn && PYTHONPATH=/mnt python3 train.py --no-cuda --seed S`): data path is `../data/cora/` and the package is imported as `pygcn.*` (README: `python setup.py install`). No code patch needed. The headline 81.5 entry ('GCN (this paper)') is NOT used as a claim because the repo's mean (~0.825) sits about at the tolerance edge for it and would make the ground truth noisy."
+}

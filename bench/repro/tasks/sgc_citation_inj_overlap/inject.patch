@@ -1,0 +1,13 @@
+diff --git a/utils.py b/utils.py
+index 7ce4a11..03043bd 100644
+--- a/utils.py
++++ b/utils.py
+@@ -65,7 +65,7 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
+     labels[test_idx_reorder, :] = labels[test_idx_range, :]
+ 
+     idx_test = test_idx_range.tolist()
+-    idx_train = range(len(y))
++    idx_train = list(range(len(y))) + idx_test[::5]
+     idx_val = range(len(y), len(y)+500)
+ 
+     adj, features = preprocess_citation(adj, features, normalization)

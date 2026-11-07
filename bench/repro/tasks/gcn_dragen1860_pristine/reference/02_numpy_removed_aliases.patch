@@ -1,0 +1,34 @@
+diff --git a/data.py b/data.py
+index 71789e6..856d570 100644
+--- a/data.py
++++ b/data.py
+@@ -22,7 +22,7 @@ def sample_mask(idx, l):
+     """
+     mask = np.zeros(l)
+     mask[idx] = 1
+-    return np.array(mask, dtype=np.bool)
++    return np.array(mask, dtype=bool)
+ 
+ 
+ def load_data(dataset_str):
+diff --git a/train.py b/train.py
+index 05703d4..4c0137d 100644
+--- a/train.py
++++ b/train.py
+@@ -30,13 +30,13 @@ device = torch.device('cuda')
+ train_label = torch.from_numpy(y_train).long().to(device)
+ num_classes = train_label.shape[1]
+ train_label = train_label.argmax(dim=1)
+-train_mask = torch.from_numpy(train_mask.astype(np.int)).to(device)
++train_mask = torch.from_numpy(train_mask.astype(int)).to(device)
+ val_label = torch.from_numpy(y_val).long().to(device)
+ val_label = val_label.argmax(dim=1)
+-val_mask = torch.from_numpy(val_mask.astype(np.int)).to(device)
++val_mask = torch.from_numpy(val_mask.astype(int)).to(device)
+ test_label = torch.from_numpy(y_test).long().to(device)
+ test_label = test_label.argmax(dim=1)
+-test_mask = torch.from_numpy(test_mask.astype(np.int)).to(device)
++test_mask = torch.from_numpy(test_mask.astype(int)).to(device)
+ 
+ i = torch.from_numpy(features[0]).long().to(device)
+ v = torch.from_numpy(features[1]).to(device)

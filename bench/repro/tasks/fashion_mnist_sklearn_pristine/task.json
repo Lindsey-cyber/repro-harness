@@ -1,0 +1,110 @@
+{
+  "id": "fashion_mnist_sklearn_pristine",
+  "variant": "pristine",
+  "paper": {
+    "arxiv": "1708.07747",
+    "title": "Fashion-MNIST: a Novel Image Dataset for Benchmarking Machine Learning Algorithms"
+  },
+  "repo": {
+    "url": "https://github.com/zalandoresearch/fashion-mnist",
+    "commit": "b2617bb6d3ffa2e429640350f613e3291e10b141"
+  },
+  "objective": "Using the repository's benchmark runner (benchmark/runner.py and benchmark/baselines.json), reproduce the Fashion-MNIST test accuracy of three entries of Table 3: DecisionTreeClassifier (entropy, max_depth=10, splitter=best), ExtraTreeClassifier (gini, max_depth=10, splitter=best) and GaussianNB (uniform priors).",
+  "claims": [
+    {
+      "id": "dtree_entropy_d10_best",
+      "table": "Table 3",
+      "dataset": "Fashion-MNIST",
+      "method": "DecisionTreeClassifier criterion=entropy max_depth=10 splitter=best",
+      "metric": "accuracy",
+      "value": 0.798,
+      "std": null
+    },
+    {
+      "id": "extratree_gini_d10_best",
+      "table": "Table 3",
+      "dataset": "Fashion-MNIST",
+      "method": "ExtraTreeClassifier criterion=gini max_depth=10 splitter=best",
+      "metric": "accuracy",
+      "value": 0.775,
+      "std": null
+    },
+    {
+      "id": "gnb_uniform_priors",
+      "table": "Table 3",
+      "dataset": "Fashion-MNIST",
+      "method": "GaussianNB priors=[0.1]*10",
+      "metric": "accuracy",
+      "value": 0.511,
+      "std": null
+    }
+  ],
+  "expected": [
+    {
+      "claim": "dtree_entropy_d10_best",
+      "status": "not_reproduced",
+      "reference": {
+        "mean": 0.811,
+        "std": 0.0,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.811,
+          0.811,
+          0.811
+        ],
+        "tol": 0.01
+      },
+      "why": "Deterministic 0.811 with current scikit-learn (tree-building changes since 2017); 0.013 above the paper, just outside the 0.01 tolerance."
+    },
+    {
+      "claim": "extratree_gini_d10_best",
+      "status": "reproduced",
+      "reference": {
+        "mean": 0.7797,
+        "std": 0.0035,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.78,
+          0.783,
+          0.776
+        ],
+        "tol": 0.01
+      },
+      "why": "Within tolerance (mean about 0.78) despite training-set shuffling noise."
+    },
+    {
+      "claim": "gnb_uniform_priors",
+      "status": "not_reproduced",
+      "reference": {
+        "mean": 0.57,
+        "std": 0.0,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.57,
+          0.57,
+          0.57
+        ],
+        "tol": 0.01
+      },
+      "why": "Current scikit-learn gives 0.570 (var_smoothing/numerics differ from the 2017 version); the paper's 0.511 is not reached."
+    }
+  ],
+  "root_causes": [
+    "env.version_drift",
+    "repro.claim_not_met"
+  ],
+  "fix_check": null,
+  "notes": "Table 3 of arXiv 1708.07747 (pdftotext), columns Fashion / MNIST: 'DecisionTreeClassifier criterion=entropy max_depth=10 splitter=best 0.798 0.873'; 'ExtraTreeClassifier criterion=gini max_depth=10 splitter=best 0.775 0.806'; 'GaussianNB priors=[0.1, ...] 0.511 0.524'. Text: 'All algorithms are repeated 5 times by shuffling the training data and the average accuracy on the test set is reported.' Seeds: the runner has no seed option; each of the 3 'seeds' is one invocation of the runner, which itself repeats each configuration twice with shuffled training data (the reported value is that run's mean). The runner never exits by itself (worker loop blocks on the job queue) so reference runs are cut with `timeout 120`; results are read from the 'done!' log lines. Fixes: time.clock was removed in python 3.8 (the runner catches the AttributeError per job and logs 'failed', so every job fails silently) -> 01; the unrestricted baselines.json holds 129 configurations including GaussianProcessClassifier and SVC on 60000 samples which cannot finish in the limits, so the job list is restricted to the three claimed configurations -> 02 (a system may equally write its own driver). Other deprecations (PassiveAggressiveClassifier, loss names) only matter for configs outside the claims."
+}

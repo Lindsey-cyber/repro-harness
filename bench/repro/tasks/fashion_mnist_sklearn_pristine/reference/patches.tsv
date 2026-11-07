@@ -1,0 +1,2 @@
+01_time_clock_removed.patch	time.clock() no longer exists in python>=3.8; replaced by time.perf_counter()
+02_restrict_baselines_to_claimed_configs.patch	full 129-config baselines cannot run on CPU in limits; keep only the three configs behind the claims

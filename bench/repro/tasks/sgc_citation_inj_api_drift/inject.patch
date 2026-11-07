@@ -1,0 +1,13 @@
+diff --git a/utils.py b/utils.py
+index 7ce4a11..bd34eea 100644
+--- a/utils.py
++++ b/utils.py
+@@ -22,7 +22,7 @@ def preprocess_citation(adj, features, normalization="FirstOrderGCN"):
+ 
+ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
+     """Convert a scipy sparse matrix to a torch sparse tensor."""
+-    sparse_mx = sparse_mx.tocoo().astype(np.float32)
++    sparse_mx = sparse_mx.tocoo().astype(np.float)
+     indices = torch.from_numpy(
+         np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
+     values = torch.from_numpy(sparse_mx.data)

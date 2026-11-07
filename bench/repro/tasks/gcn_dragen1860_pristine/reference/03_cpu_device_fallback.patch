@@ -1,0 +1,13 @@
+diff --git a/train.py b/train.py
+index 4c0137d..c399d08 100644
+--- a/train.py
++++ b/train.py
+@@ -26,7 +26,7 @@ print('mask:', train_mask.shape, val_mask.shape, test_mask.shape)
+ features = preprocess_features(features) # [49216, 2], [49216], [2708, 1433]
+ supports = preprocess_adj(adj)
+ 
+-device = torch.device('cuda')
++device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+ train_label = torch.from_numpy(y_train).long().to(device)
+ num_classes = train_label.shape[1]
+ train_label = train_label.argmax(dim=1)

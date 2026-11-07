@@ -1,0 +1,4 @@
+01_scipy_eigsh_import.patch	scipy.sparse.linalg.eigen.arpack was removed; import eigsh from scipy.sparse.linalg
+02_numpy_removed_aliases.patch	np.bool / np.int aliases were removed in numpy>=1.24
+03_cpu_device_fallback.patch	device was hard-coded to cuda; fall back to cpu
+90_measurement_aid_seed_flag.patch	measurement aid only: expose the hard-coded seed as --seed to run several seeds

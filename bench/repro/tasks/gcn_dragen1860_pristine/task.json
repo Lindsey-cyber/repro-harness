@@ -1,0 +1,67 @@
+{
+  "id": "gcn_dragen1860_pristine",
+  "variant": "pristine",
+  "paper": {
+    "arxiv": "1609.02907",
+    "title": "Semi-Supervised Classification with Graph Convolutional Networks"
+  },
+  "repo": {
+    "url": "https://github.com/dragen1860/GCN-PyTorch",
+    "commit": "623aa67f0d1c3384fe56f3a20e14e2c13845bcd9"
+  },
+  "objective": "Reproduce the Cora test accuracy of the GCN in Table 2 ('GCN (this paper)') using this PyTorch port, following its README.",
+  "claims": [
+    {
+      "id": "cora_acc",
+      "table": "Table 2",
+      "dataset": "Cora",
+      "method": "GCN (this paper)",
+      "metric": "accuracy",
+      "value": 0.815,
+      "std": null
+    }
+  ],
+  "expected": [
+    {
+      "claim": "cora_acc",
+      "status": "reproduced",
+      "reference": {
+        "mean": 0.8192,
+        "std": 0.0043,
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "values": [
+          0.815,
+          0.814,
+          0.823,
+          0.822,
+          0.822
+        ],
+        "tol": 0.01
+      },
+      "why": "Reproduced only after (a) three drift/hardware fixes so that it runs on CPU with current scipy/numpy and (b) using 400 epochs as the README hint says ('To achieve 81.7% on Cora dataset, pytorch need 400 epochs'). With the default 200 epochs the five-seed mean is about 0.79 with large variance (0.73-0.82).",
+      "default_200_epochs": {
+        "values": [
+          0.801,
+          0.734,
+          0.803,
+          0.817,
+          0.813
+        ],
+        "mean": 0.7936
+      }
+    }
+  ],
+  "root_causes": [
+    "env.version_drift",
+    "other:hardcoded_cuda",
+    "env.path_or_config"
+  ],
+  "fix_check": null,
+  "notes": "Table 2 of arXiv 1609.02907 (pdftotext): 'GCN (this paper)  70.3 (7s)  81.5 (4s)  79.0 (38s)  66.0 (48s)' and 'GCN (rand. splits)  67.9 \u00b1 0.5  80.1 \u00b1 0.5  78.9 \u00b1 0.7  58.4 \u00b1 1.7' (columns Citeseer, Cora, Pubmed, NELL). The claim here is the Cora entry of the 'GCN (this paper)' row: 81.5. Fixes: scipy.sparse.linalg.eigen.arpack import removed (01); np.bool/np.int removed from numpy (02); torch.device('cuda') hard-coded (03). env.path_or_config denotes the wrong default epochs (200 instead of the 400 the README says are needed). The seed in train.py is hard-coded (123) and the default run gave 0.572 on this setup; patch 90 is only a measurement aid adding a --seed flag so that >= 3 seeds can be run, it is not a root cause. Reference command: python3 train.py --epochs 400 --seed S."
+}

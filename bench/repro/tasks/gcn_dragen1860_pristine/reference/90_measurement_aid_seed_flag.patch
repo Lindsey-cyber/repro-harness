@@ -1,0 +1,25 @@
+diff --git a/config.py b/config.py
+index 3bcf6ac..6b1db3d 100644
+--- a/config.py
++++ b/config.py
+@@ -10,6 +10,7 @@ args.add_argument('--dropout', type=float, default=0.5)
+ args.add_argument('--weight_decay', type=float, default=5e-4)
+ args.add_argument('--early_stopping', type=int, default=10)
+ args.add_argument('--max_degree', type=int, default=3)
++args.add_argument('--seed', type=int, default=123)
+ 
+ 
+ args = args.parse_args()
+diff --git a/train.py b/train.py
+index c399d08..5dd9f4b 100644
+--- a/train.py
++++ b/train.py
+@@ -10,7 +10,7 @@ from    config import  args
+ from    utils import masked_loss, masked_acc
+ 
+ 
+-seed = 123
++seed = args.seed
+ np.random.seed(seed)
+ torch.random.manual_seed(seed)
+ 

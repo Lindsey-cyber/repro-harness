@@ -1,0 +1,3 @@
+Environment: python 3.13, site dir built with `tools/sbx.sh bench/repro/.cache --site bench/repro/.cache/site-torch --net -- python3 -m pip install --target /opt torch --index-url https://download.pytorch.org/whl/cpu` then `... pip install --target /opt numpy scipy scikit-learn psutil pandas texttable tqdm` (see pip_freeze.txt). Runs: `tools/sbx.sh <workdir> --site <site> -- <cmd>` (no network, 1 thread, workdir = clone at repo.commit + patches).
+
+Command (per run i in 0 1 2, fresh clone + both patches): timeout 120 python3 benchmark/runner.py   (see tools/fashion_run.sh); parse 'done! acc: X ... classifier: "Name"' lines.

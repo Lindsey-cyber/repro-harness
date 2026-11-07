@@ -1,0 +1,18 @@
+diff --git a/benchmark/runner.py b/benchmark/runner.py
+index 905d1b0..ef6baf9 100644
+--- a/benchmark/runner.py
++++ b/benchmark/runner.py
+@@ -90,11 +90,11 @@ class JobWorker(Process):
+                 LOGGER.error('Can not found "%s" in scikit-learn, missing import?' % cur_job.clf_name)
+ 
+     def get_accuracy(self, clf_name, clf_par, id):
+-        start_time = time.clock()
++        start_time = time.perf_counter()
+         clf = globals()[clf_name](**clf_par)
+         Xs, Ys = shuffle(self.X, self.Y)
+         cur_score = clf.fit(Xs, Ys).score(self.Xt, self.Yt)
+-        duration = time.clock() - start_time
++        duration = time.perf_counter() - start_time
+         LOGGER.info('#test: %d acc: %0.3f time: %.3fs classifier: "%s" parameter: "%s"' % (id, cur_score,
+                                                                                            duration,
+                                                                                            clf_name,

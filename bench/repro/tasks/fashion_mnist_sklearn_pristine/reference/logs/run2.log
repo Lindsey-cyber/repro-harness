@@ -1,0 +1,19 @@
+2026-11-07 18:41:53,220 runner.py:_sanity_check:[INFO] 3 classifiers to test, 0 fail to create!
+2026-11-07 18:41:56,070 runner.py:run:[INFO] job received! repeat: 2 classifier: "DecisionTreeClassifier" parameter: "{'criterion': 'entropy', 'splitter': 'best', 'max_depth': 10}"
+2026-11-07 18:41:56,074 runner.py:run:[INFO] job received! repeat: 2 classifier: "ExtraTreeClassifier" parameter: "{'criterion': 'gini', 'splitter': 'best', 'max_depth': 10}"
+2026-11-07 18:41:57,061 runner.py:get_accuracy:[INFO] #test: 0 acc: 0.773 time: 0.987s classifier: "ExtraTreeClassifier" parameter: "{'criterion': 'gini', 'splitter': 'best', 'max_depth': 10}"
+2026-11-07 18:41:57,887 runner.py:get_accuracy:[INFO] #test: 1 acc: 0.779 time: 0.824s classifier: "ExtraTreeClassifier" parameter: "{'criterion': 'gini', 'splitter': 'best', 'max_depth': 10}"
+2026-11-07 18:41:57,889 runner.py:run:[INFO] done! acc: 0.776 (+/- 0.006) repeated: 2 classifier: "ExtraTreeClassifier" parameter: "{'criterion': 'gini', 'splitter': 'best', 'max_depth': 10}" 
+2026-11-07 18:41:57,889 runner.py:run:[INFO] job received! repeat: 2 classifier: "GaussianNB" parameter: "{'priors': [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]}"
+2026-11-07 18:41:59,174 runner.py:get_accuracy:[INFO] #test: 0 acc: 0.570 time: 1.285s classifier: "GaussianNB" parameter: "{'priors': [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]}"
+2026-11-07 18:42:00,480 runner.py:get_accuracy:[INFO] #test: 1 acc: 0.570 time: 1.304s classifier: "GaussianNB" parameter: "{'priors': [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]}"
+2026-11-07 18:42:00,482 runner.py:run:[INFO] GaussianNB is invariant to training data shuffling, will stop repeating!
+2026-11-07 18:42:00,483 runner.py:run:[INFO] done! acc: 0.570 (+/- 0.000) repeated: 2 classifier: "GaussianNB" parameter: "{'priors': [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]}" 
+2026-11-07 18:42:13,987 runner.py:get_accuracy:[INFO] #test: 0 acc: 0.811 time: 17.917s classifier: "DecisionTreeClassifier" parameter: "{'criterion': 'entropy', 'splitter': 'best', 'max_depth': 10}"
+2026-11-07 18:42:32,326 runner.py:get_accuracy:[INFO] #test: 1 acc: 0.811 time: 18.336s classifier: "DecisionTreeClassifier" parameter: "{'criterion': 'entropy', 'splitter': 'best', 'max_depth': 10}"
+2026-11-07 18:42:32,328 runner.py:run:[INFO] DecisionTreeClassifier is invariant to training data shuffling, will stop repeating!
+2026-11-07 18:42:32,329 runner.py:run:[INFO] done! acc: 0.811 (+/- 0.000) repeated: 2 classifier: "DecisionTreeClassifier" parameter: "{'criterion': 'entropy', 'splitter': 'best', 'max_depth': 10}" 
+
+real	2m0.016s
+user	0m2.942s
+sys	0m1.482s

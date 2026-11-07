@@ -1,0 +1,20 @@
+$ python3 citation.py --dataset cora --tuned --seed 1
+using tuned weight decay: 1.3026973714043257e-05
+Traceback (most recent call last):
+  File "/mnt/citation.py", line 28, in <module>
+    adj, features, labels, idx_train, idx_val, idx_test = load_citation(args.dataset, args.normalization, args.cuda)
+                                                          ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/utils.py", line 77, in load_citation
+    adj = sparse_mx_to_torch_sparse_tensor(adj).float()
+          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/mnt/utils.py", line 25, in sparse_mx_to_torch_sparse_tensor
+    sparse_mx = sparse_mx.tocoo().astype(np.float)
+                                         ^^^^^^^^
+  File "/opt/numpy/__init__.py", line 760, in __getattr__
+    raise AttributeError(__former_attrs__[attr], name=None)
+AttributeError: module 'numpy' has no attribute 'float'.
+`np.float` was a deprecated alias for the builtin `float`. To avoid this error in existing code, use `float` by itself. Doing this will not modify any behavior and is safe. If you specifically wanted the numpy scalar type, use `np.float64` here.
+The aliases was originally deprecated in NumPy 1.20; for more details and guidance see the original release note at:
+    https://numpy.org/devdocs/release/1.20.0-notes.html#deprecations
+exit=1
+wall_s=3

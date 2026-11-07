@@ -1,0 +1,255 @@
+diff --git a/benchmark/baselines.json b/benchmark/baselines.json
+index 081cbb6..7629a4f 100644
+--- a/benchmark/baselines.json
++++ b/benchmark/baselines.json
+@@ -1,156 +1,37 @@
+ {
+-  "common": {
+-  },
++  "common": {},
+   "classifiers": {
+-    "PassiveAggressiveClassifier": [
+-      {
+-        "C": [
+-          1.0,
+-          10.0,
+-          100.0
+-        ]
+-      }
+-    ],
+-    "SGDClassifier": [
+-      {
+-        "loss": [
+-          "hinge",
+-          "squared_hinge",
+-          "perceptron",
+-          "log",
+-          "modified_huber"
+-        ]
+-      },
+-      {
+-        "penalty": [
+-          "l1",
+-          "l2",
+-          "elasticnet"
+-        ]
+-      }
+-    ],
+-    "Perceptron": [
+-      {
+-        "penalty": [
+-          "l1",
+-          "l2",
+-          "elasticnet"
+-        ]
+-      }
+-    ],
+     "DecisionTreeClassifier": [
+       {
+         "criterion": [
+-          "gini",
+           "entropy"
+         ]
+       },
+       {
+         "splitter": [
+-          "best",
+-          "random"
++          "best"
+         ]
+       },
+       {
+         "max_depth": [
+-          10,
+-          50,
+-          100
++          10
+         ]
+       }
+     ],
+-    "RandomForestClassifier": [
++    "ExtraTreeClassifier": [
+       {
+         "criterion": [
+-          "gini",
+-          "entropy"
+-        ]
+-      },
+-      {
+-        "max_depth": [
+-          10,
+-          50,
+-          100
++          "gini"
+         ]
+       },
+       {
+-        "n_estimators": [
+-          10,
+-          50,
+-          100
+-        ]
+-      }
+-    ],
+-    "LogisticRegression": [
+-      {
+-        "penalty": [
+-          "l1",
+-          "l2"
+-        ]
+-      },
+-      {
+-        "C": [
+-          1.0,
+-          10.0,
+-          100.0
+-        ]
+-      },
+-      {
+-        "multi_class": [
+-          "ovr",
+-          "multinomial"
+-        ]
+-      }
+-    ],
+-    "MLPClassifier": [
+-      {
+-        "activation": [
+-          "tanh",
+-          "relu"
+-        ],
+-        "hidden_layer_sizes": [
+-          "(10,)",
+-          "(100,)",
+-          "(10,10,)",
+-          "(100,10,)"
+-        ]
+-      }
+-    ],
+-    "KNeighborsClassifier": [
+-      {
+-        "n_neighbors": [
+-          1,
+-          5,
+-          9
+-        ]
+-      },
+-      {
+-        "weights": [
+-          "uniform",
+-          "distance"
+-        ]
+-      },
+-      {
+-        "p": [
+-          1,
+-          2
+-        ]
+-      }
+-    ],
+-    "SVC": [
+-      {
+-        "C": [
+-          1.0,
+-          10.0,
+-          100.0
++        "splitter": [
++          "best"
+         ]
+       },
+       {
+-        "kernel": [
+-          "linear",
+-          "rbf",
+-          "poly",
+-          "sigmoid"
++        "max_depth": [
++          10
+         ]
+       }
+     ],
+@@ -171,83 +52,6 @@
+           ]
+         ]
+       }
+-    ],
+-    "ExtraTreeClassifier": [
+-      {
+-        "criterion": [
+-          "gini",
+-          "entropy"
+-        ]
+-      },
+-      {
+-        "splitter": [
+-          "best",
+-          "random"
+-        ]
+-      },
+-      {
+-        "max_depth": [
+-          10,
+-          50,
+-          100
+-        ]
+-      }
+-    ],
+-    "GaussianProcessClassifier": [
+-      {
+-        "multi_class": [
+-          "one_vs_one",
+-          "one_vs_rest"
+-        ]
+-      }
+-    ],
+-    "GradientBoostingClassifier": [
+-      {
+-        "loss": [
+-          "deviance"
+-        ]
+-      },
+-      {
+-        "n_estimators": [
+-          10,
+-          50,
+-          100
+-        ]
+-      },
+-      {
+-        "max_depth": [
+-          3,
+-          10,
+-          50
+-        ]
+-      }
+-    ],
+-    "LinearSVC": [
+-      {
+-        "loss": [
+-          "hinge",
+-          "squared_hinge"
+-        ]
+-      },
+-      {
+-        "penalty": [
+-          "l1",
+-          "l2"
+-        ]
+-      },
+-      {
+-        "C": [
+-          1.0,
+-          10.0,
+-          100.0
+-        ]
+-      },
+-      {
+-        "multi_class": [
+-          "ovr",
+-          "crammer_singer"
+-        ]
+-      }
+     ]
+   }
+ }
+\ No newline at end of file

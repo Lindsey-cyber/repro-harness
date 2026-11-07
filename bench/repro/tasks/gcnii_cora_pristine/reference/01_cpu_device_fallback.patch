@@ -1,0 +1,13 @@
+diff --git a/train.py b/train.py
+index aac0e89..05ff9bf 100644
+--- a/train.py
++++ b/train.py
+@@ -36,7 +36,7 @@ torch.cuda.manual_seed(args.seed)
+ 
+ # Load data
+ adj, features, labels,idx_train,idx_val,idx_test = load_citation(args.data)
+-cudaid = "cuda:"+str(args.dev)
++cudaid = "cuda:"+str(args.dev) if torch.cuda.is_available() else "cpu"
+ device = torch.device(cudaid)
+ features = features.to(device)
+ adj = adj.to(device)

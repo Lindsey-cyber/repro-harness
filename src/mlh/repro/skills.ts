@@ -160,10 +160,11 @@ const run: Skill = {
       const log = join(sb.dir, ".mlh_run.log");
       writeFileSync(log, `$ ${cmd.join(" ")}\n--- stdout\n${r.stdout.slice(-20000)}\n--- stderr\n${r.stderr.slice(-20000)}`);
       ctx.save("log", log);
-      if (r.category) throw new SkillError(r.category, `${argv.join(" ")} → ${r.category}: ${r.stderr.replace(/^MLH_EXIT=\d+$/m, "").slice(-1500)}`);
       const value = parseMetric(spec, c.metric, `${r.stdout}\n${r.stderr}`);
+      // A program that prints its result and then keeps running is cut at the timeout; the printed result stands.
+      if (r.category && !(r.category === "timeout" && value !== undefined)) throw new SkillError(r.category, `${argv.join(" ")} → ${r.category}: ${r.stderr.replace(/^MLH_EXIT=\d+$/m, "").slice(-1500)}`);
       if (value === undefined) throw new SkillError("experiment_error", `metric not found with /${spec.parse}/ in the output; tail:\n${r.stdout.slice(-800)}`);
-      return { output: { claim, seed, value, version, ms: Math.round(r.ms) } };
+      return { output: { claim, seed, value, version, ms: Math.round(r.ms), ...(r.category === "timeout" ? { cutAtTimeout: true } : {}) } };
     } finally { sb.remove(); }
   },
 };

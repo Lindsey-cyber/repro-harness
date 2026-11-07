@@ -1,0 +1,64 @@
+{
+  "id": "gcn_pygcn_inj_resource",
+  "variant": "injected",
+  "paper": {
+    "arxiv": "1609.02907",
+    "title": "Semi-Supervised Classification with Graph Convolutional Networks"
+  },
+  "repo": {
+    "url": "https://github.com/tkipf/pygcn",
+    "commit": "1600b5b748b3976413d1e307540ccc62605b4d6d"
+  },
+  "objective": "Reproduce, using this repository, the Cora test accuracy of the GCN in the 'GCN (rand. splits)' row of Table 2.",
+  "claims": [
+    {
+      "id": "cora_rand_acc",
+      "table": "Table 2",
+      "dataset": "Cora",
+      "method": "GCN (rand. splits)",
+      "metric": "accuracy",
+      "value": 0.801,
+      "std": 0.005
+    }
+  ],
+  "expected": [
+    {
+      "claim": "cora_rand_acc",
+      "status": "not_reproduced",
+      "reference": {
+        "mean": 0.8193,
+        "std": 0.0021,
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "values": [
+          0.817,
+          0.821,
+          0.82
+        ],
+        "tol": 0.01
+      },
+      "why": "With the hidden size back at the paper's 16 the repo behaves as in the pristine task: runs, but its protocol differs and the number is outside tolerance.",
+      "buggy": {
+        "note": "documented defaults do not finish: 2 epochs take ~26 s (13 s/epoch, 200 epochs ~ 43 min, limit 15 min); 120 s timeout log in logs/buggy_timeout120s.log"
+      }
+    }
+  ],
+  "root_causes": [
+    "run.resource_limit",
+    "protocol.mismatch"
+  ],
+  "fix_check": {
+    "command": [
+      "sh",
+      "-c",
+      "cd pygcn && PYTHONPATH=/opt:/mnt python3 train.py --no-cuda --seed {seed}"
+    ],
+    "parse": "accuracy= ([0-9.]+)",
+    "claim": "cora_rand_acc",
+    "pristine_reference_mean": 0.8244
+  },
+  "notes": "Table 2 of arXiv 1609.02907 (pdftotext): 'GCN (this paper)  70.3 (7s)  81.5 (4s)  79.0 (38s)  66.0 (48s)' and 'GCN (rand. splits)  67.9 \u00b1 0.5  80.1 \u00b1 0.5  78.9 \u00b1 0.7  58.4 \u00b1 1.7' (columns Citeseer, Cora, Pubmed, NELL). The claim here is the Cora entry of the 'GCN (rand. splits)' row. Resource defect: the documented configuration (defaults) exceeds the 15 minute / CPU limit; the paper's setting (16 hidden units) is cheap. Expected status is for the reasonable setting. A system that reports not_runnable without trying the paper's hyperparameter has missed the point. `{seed}` is the per-seed placeholder. Runs are slightly non-deterministic (see pristine task)."
+}
