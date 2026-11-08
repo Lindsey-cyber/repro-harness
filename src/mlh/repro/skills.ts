@@ -150,7 +150,9 @@ const plan: Skill = {
       // Multi-stage plan on remote GPUs, validated (structure, GPU allowlist, worst-case cost) by the harness.
       let feedback = "";
       for (let attempt = 0; attempt < 3; attempt++) {
-        const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state)), paper: paperText(ctx), role: GPU_PLAN_ROLE, workDir: join(ctx.workDir(), `a${attempt}`), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip })}${feedback}` });
+        const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state)), paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip })}`,
+          // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
+          role: { ...GPU_PLAN_ROLE, maxSteps: GPU_PLAN_ROLE.maxSteps + attempt * 10 }, ...(feedback ? { continueWith: feedback.trim() } : {}) });
         const v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: gpuPrice });
         if (v.plan) return { output: { specs: [], errors: [], gpuPlan: v.plan } };
         feedback = `\n\nYour previous plan was rejected: ${v.errors.join("; ")}. Fix it.`;
