@@ -26,7 +26,7 @@ interface Ev { t: string; at: string; id?: string; node?: { id: string; skill: s
 const events = (runDir: string): Ev[] => (existsSync(join(runDir, "journal.jsonl")) ? readFileSync(join(runDir, "journal.jsonl"), "utf8").split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l) as Ev]; } catch { return []; } }) : []);
 
 // How long a run may go without a journal event: long GPU stages emit nothing while they run.
-function allowedSilenceMs(runDir: string): number {
+export function allowedSilenceMs(runDir: string): number {
   const ev = events(runDir);
   const started = new Set(ev.filter((e) => e.t === "start").map((e) => e.id));
   for (const e of ev) if (e.t === "ok" || e.t === "fail") started.delete(e.id);
