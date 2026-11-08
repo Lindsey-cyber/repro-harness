@@ -1,0 +1,1 @@
+{"paper":"detr","arxiv":"2005.12872","claims":[{"id":"detr_r50_coco_val2017_box_ap","paper":0.42,"status":"reproduced","mean":0.42}],"fidelity":"eval_only","image":"py3.11-torch2.5-cu124","smoke":true,"gpuUsd":0.464,"llmTokens":1367118,"llmUsd":0.055,"wallMin":40,"resumes":0,"failures":{},"failedNodes":[],"stopped":null,"done":true}
