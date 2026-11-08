@@ -168,8 +168,9 @@ const env: Skill = {
     let r = await agentLoop({ ...base, role: ENV_ROLE });
     // Complex repositories need more than one step budget: an agent that stopped at its limit with the
     // experiment still not runnable continues from its checkpoint (two more rounds at most).
-    for (let round = 2; round <= 3 && r.report && r.report.runnable === false && r.steps >= ENV_ROLE.maxSteps * (round - 1); round++) {
-      r = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: ENV_ROLE.maxSteps * round }, continueWith: `The experiment is not runnable yet. Continue from where you stopped: resolve the remaining problems (${JSON.stringify((r.report.problems as { category: string }[] | undefined)?.map((p) => p.category) ?? [])}), verify by starting the documented command, then report again.` });
+    for (let round = 2; round <= 3 && (!r.report || r.report.runnable === false) && r.steps >= ENV_ROLE.maxSteps * (round - 1); round++) {
+      const left = r.report ? JSON.stringify((r.report.problems as { category: string }[] | undefined)?.map((p) => p.category) ?? []) : "unknown (you did not report)";
+      r = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: Math.max(r.steps, ENV_ROLE.maxSteps * (round - 1)) + ENV_ROLE.maxSteps }, continueWith: `The experiment is not runnable yet. Continue from where you stopped: resolve the remaining problems (${left}), verify by starting the documented command, then report.` });
     }
     if (!r.report) throw new SkillError("experiment_error", "environment agent ran out of steps without a report");
     // Harness-verified: the launch command must actually start. One repair round if it does not.

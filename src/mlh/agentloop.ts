@@ -107,9 +107,11 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   const tools = [...o.role.tools.map((t) => defs[t]), { type: "function" as const, function: { name: "report", description: o.role.report.description, parameters: o.role.report.parameters } }];
   const finish = (report: Record<string, unknown> | null, stopped: LoopResult["stopped"]): LoopResult => ({ report, steps: state.step, sandboxRuns: state.stats.runs, sandboxMs: Math.round(state.stats.ms), stopped, workspace: ws, pip: state.pip ?? [], ...(state.image ? { image: state.image } : {}), ...(state.site ? { site: state.site } : {}), ...(resumedAt !== undefined ? { resumedAt } : {}) });
   let here = 0;
-  while (state.step < o.role.maxSteps) {
+  // A run killed at its last step resumes with one step left, in which it must report.
+  const limit = Math.max(o.role.maxSteps, resumedAt !== undefined ? state.step + 1 : 0);
+  while (state.step < limit) {
     const step = state.step + 1;
-    const msgs: ChatMsg[] = step === o.role.maxSteps ? [...state.messages, { role: "user", content: "Step budget exhausted: call report now." }] : state.messages;
+    const msgs: ChatMsg[] = step === limit ? [...state.messages, { role: "user", content: "Step budget exhausted: call report now." }] : state.messages;
     const { message: msg } = await o.model.chat(msgs, { tools, maxTokens: 16000 });
     const next: ChatMsg[] = [...msgs, { role: "assistant", content: msg.content ?? "", ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}), ...(msg.reasoning_content ? { reasoning_content: msg.reasoning_content } : {}) }];
     appendFileSync(log, JSON.stringify({ step, content: msg.content, tool_calls: msg.tool_calls }) + "\n");

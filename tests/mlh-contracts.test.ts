@@ -59,6 +59,18 @@ describe("remote tool contracts", () => {
   });
 });
 
+describe("agent resume", () => {
+  it("an agent killed at its last step resumes with one step in which it reports", async () => {
+    const src = tmp(); writeFileSync(join(src, "a"), "");
+    const wd = tmp();
+    const run = (calls: { name: string; args: Record<string, unknown> }[]) => agentLoop({ role: { ...role, maxSteps: 2 }, workDir: wd, source: src, task: "t", checkpoint: true, isolation: "namespace", isolationEvidence: { kind: "deterministic", check: "x", ok: true }, model: scripted(calls), remote: { pip: [], gpus: [], run: async () => ({ code: 0, stdout: "", stderr: "", category: null, costUsd: 0 }) } });
+    const first = await run([{ name: "install", args: { packages: ["a"] } }, { name: "install", args: { packages: ["b"] } }]);
+    expect(first).toMatchObject({ report: null, stopped: "budget", steps: 2 });
+    const again = await run([{ name: "report", args: { done: true } }]);
+    expect(again).toMatchObject({ report: { done: true }, stopped: "report", steps: 3, resumedAt: 2 });
+  });
+});
+
 describe("campaign summary", () => {
   it("summarizes a run directory: claim statuses, GPU and LLM cost, failure categories, fatal stop", () => {
     const d = tmp();
