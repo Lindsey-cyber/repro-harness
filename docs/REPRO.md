@@ -121,18 +121,23 @@ The benchmark has 6 pristine paper+repo tasks (SGC, two GCN implementations, GCN
 6. The sandbox wrapper's `set -e` lost the exit marker of a failing command, so `cd` failures were misread as transient sandbox faults and retried.
 7. Provider-outage retries had the same small budget as other failures even though agent nodes resume from checkpoints. The budget is now 3× larger.
 
-### Reliability experiment: inconclusive, needs a rerun
+### Reliability experiment: 10% injected provider outages (3 tasks, after the fixes)
 
-The run used a 10% injected provider-outage rate on 3 tasks.
-- The **solo** agent failed all 3. It restarts from scratch on every outage and never got through about 60 steps.
-- The **team** also solved none, for reasons that were harness bugs rather than the design: bugs 6 and 7, plus a planner that wrote the placeholder `<repo root>` as the working directory (now rejected).
-- The provider account then ran out of balance (HTTP 402) during the last task.
+Each model call fails with probability 0.1, simulating an outage that outlasts the client's own retries. The **solo** agent restarts from scratch, up to 3 times. In the **team**, a failed agent node is retried and resumes from its last checkpointed step.
 
-So the experiment says nothing yet about the design. Rerun it after the fixes:
+| | solo | team |
+|---|---|---|
+| runs that finished | 0/3 | 3/3 |
+| claim status accuracy | 0.00 | 0.80 (4/5 claims) |
+| tasks solved | 0 | 1 (two missed only a root-cause label or the hidden fix check) |
+| LLM tokens / cost | 1.12M / $0.044 | 1.16M / $0.051 |
 
-```bash
-MLH_LLM_SALT=faults2 npm run mlh -- repro-bench --modes solo,team --label faults10b --provider-faults 0.1 --tasks sgc_citation_pristine,gcn_dragen1860_pristine,sgc_citation_inj_evalpath
-```
+This is the first **controlled** result where the harness structure changes the outcome. A reproduction takes about 60 sequential model calls. At a 10% per-call failure rate, a from-scratch agent almost never gets through: 0.9⁶⁰ ≈ 0.2%. Checkpointed nodes lose at most one step per outage, for about the same token spend.
+
+Caveats:
+- 3 tasks, one sample each.
+- The outage model is per-call and independent, so real outages, which are bursty, would hit both systems differently.
+- A solo agent wrapped in a step-level checkpoint loop would close much of the gap. That would be adopting this harness's mechanism, which is the point.
 
 ### Honest caveats
 
