@@ -14,6 +14,7 @@ ops:
   run    {repo, cmd, gpu, timeout_s, network, env, pip, image, restore, persist, outputs}
          -> {exit_code, stdout, stderr, elapsed_s, files: {relpath: text}}
 """
+import contextlib
 import io
 import json
 import os
@@ -69,7 +70,15 @@ def op_run(req):
     if req.get("network") and req.get("domains"):
         kwargs["outbound_domain_allowlist"] = req["domains"]  # network restricted to data hosts
     t0 = time.time()
-    sb = modal.Sandbox.create(**kwargs)
+    # Image build output is captured so a failed build reports why (which package, which error).
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf), modal.enable_output():
+            sb = modal.Sandbox.create(**kwargs)
+    except Exception as e:
+        lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+        errs = [l for l in lines if any(k in l for k in ("error", "Error", "ERROR", "failed", "Failed", "No matching distribution"))][-15:]
+        raise RuntimeError(f"{type(e).__name__}: {e}\nbuild errors:\n" + "\n".join(errs) + "\nbuild log tail:\n" + "\n".join(lines[-15:])) from e
     try:
         sb.filesystem.write_bytes(tar_dir(req["repo"]), "/tmp/repo.tgz")
         sb.exec("bash", "-c", "mkdir -p /work && tar -xzf /tmp/repo.tgz -C /work", timeout=600).wait()
