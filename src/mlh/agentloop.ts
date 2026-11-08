@@ -39,6 +39,8 @@ export interface LoopOptions {
   crashAfterSteps?: number;
   // Resuming a finished conversation to keep working: appended as a user message before the next step.
   continueWith?: string;
+  // Role-specific tools the harness implements (e.g. the planner's check_plan, which runs the plan validator).
+  extraTools?: { def: ToolDef; run: (args: Record<string, unknown>) => Promise<string> }[];
   // Remote execution (e.g. Modal): `run` uploads the working copy and runs there (optionally on a GPU);
   // `install` adds packages to the remote image instead of a local site.
   remote?: {
@@ -104,7 +106,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     install: { type: "function", function: { name: "install", description: `Set the remote environment: optionally a base image (old repositories need old Python/PyTorch: ${Object.keys(o.remote.images ?? {}).join(", ")}; default ${o.remote.image ?? "py3.11-torch2.5-cu124"}) and pip requirement specifiers (e.g. 'transformers==4.30.2'). A specifier replaces any earlier one for the same package; '-name' removes a package. Later runs use the result; run something after changing it.`, parameters: { type: "object", properties: { packages: { type: "array", items: { type: "string" } }, image: { type: "string" } }, required: [] } } },
   } : {};
   const defs: Record<ToolName, ToolDef> = { ...DEFS, ...remoteDefs };
-  const tools = [...o.role.tools.map((t) => defs[t]), { type: "function" as const, function: { name: "report", description: o.role.report.description, parameters: o.role.report.parameters } }];
+  const tools = [...o.role.tools.map((t) => defs[t]), ...(o.extraTools ?? []).map((t) => t.def), { type: "function" as const, function: { name: "report", description: o.role.report.description, parameters: o.role.report.parameters } }];
   const finish = (report: Record<string, unknown> | null, stopped: LoopResult["stopped"]): LoopResult => ({ report, steps: state.step, sandboxRuns: state.stats.runs, sandboxMs: Math.round(state.stats.ms), stopped, workspace: ws, pip: state.pip ?? [], ...(state.image ? { image: state.image } : {}), ...(state.site ? { site: state.site } : {}), ...(resumedAt !== undefined ? { resumedAt } : {}) });
   let here = 0;
   // A run killed at its last step resumes with one step left, in which it must report.
@@ -126,6 +128,8 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
         // Malformed arguments are returned to the agent to resend, never read as an empty report.
         if (badArgs) throw new Error(`the arguments of ${call.function.name} are not valid JSON (${call.function.arguments.length} chars); resend them, keeping them shorter`);
         const name = call.function.name as ToolName | "report";
+        const extra = o.extraTools?.find((t) => t.def.function.name === name);
+        if (extra) { out = await extra.run(args); next.push({ role: "tool", tool_call_id: call.id, content: out }); continue; }
         if (name !== "report" && !o.role.tools.includes(name)) throw new Error(`tool ${name} is not available to the ${o.role.name} role`);
         switch (name) {
           case "report":
