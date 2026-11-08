@@ -48,6 +48,57 @@ async function call(req: Record<string, unknown>, timeoutMs: number): Promise<Re
   }
 }
 
+// ---- Gateway path (HTTPS). Used when MLH_GATEWAY_URL is set: the network proxy carries plain HTTPS and
+// injects the gateway token as the Authorization header; Modal's own credentials stay on Modal.
+const gateway = () => process.env.MLH_GATEWAY_URL?.replace(/\/$/, "");
+
+async function gw(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+  // "proxy-injected" is a placeholder: the proxy replaces the Authorization header with the saved token.
+  const r = await fetch(`${gateway()}${path}`, { ...init, headers: { Authorization: "Bearer proxy-injected", "Content-Type": "application/json", ...(init.headers ?? {}) }, signal: AbortSignal.timeout(120_000) });
+  const text = await r.text();
+  if (!r.ok) return { ok: false, error: `gateway ${r.status}: ${text.slice(0, 300)}` };
+  try { return { ok: true, ...(JSON.parse(text) as Record<string, unknown>) }; } catch { return { ok: false, error: `gateway returned non-JSON: ${text.slice(0, 200)}` }; }
+}
+
+async function tgzBase64(dir: string): Promise<string> {
+  const r = await runProc(["sh", "-c", 'tar --exclude=.git --exclude=__pycache__ --exclude=.mlh_in -czf - -C "$D" . | base64 -w0'], { cwd: "/tmp", env: { PATH: process.env.PATH ?? "/usr/bin:/bin", D: dir }, timeoutMs: 300_000 });
+  if (r.code !== 0) throw new Error(`packing ${dir} failed: ${r.stderr.slice(-300)}`);
+  return r.stdout.trim();
+}
+
+// Starts a job and polls until it finishes. `onStarted` receives the job id so the caller can journal
+// it: after a crash, `resumeJob(id)` collects the result of a job that kept running on Modal.
+export async function gatewayRun(run: RemoteRun, budget: Budget, onStarted?: (id: string) => void, resumeId?: string): Promise<RemoteResult> {
+  const refused = resumeId ? null : budget.admit(run);
+  if (refused) return { exitCode: -1, stdout: "", stderr: refused, elapsedS: 0, costUsd: 0, files: {}, category: "policy_denied" };
+  let id = resumeId;
+  if (!id) {
+    const s = await gw("/start", { method: "POST", body: JSON.stringify({ repo_tgz: await tgzBase64(run.repo), cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, setup: run.setup, outputs: run.outputs ?? [], image: run.image }) });
+    if (!s.ok) return { exitCode: -1, stdout: "", stderr: String(s.error), elapsedS: 0, costUsd: 0, files: {}, category: /401|403/.test(String(s.error)) ? "precondition" : "sandbox_transient" };
+    id = String(s.id);
+    onStarted?.(id);
+  }
+  const deadline = Date.now() + (run.timeoutS + 1200) * 1000;
+  for (;;) {
+    const r = await gw(`/result?id=${encodeURIComponent(id)}`);
+    if (r.ok && r.done) {
+      if (r.error) return { exitCode: -1, stdout: "", stderr: String(r.error), elapsedS: 0, costUsd: 0, files: {}, category: /Timeout/i.test(String(r.error)) ? "timeout" : "sandbox_transient" };
+      const elapsed = Number(r.elapsed_s), cost = run.gpu ? (gpuPrice(run.gpu) * elapsed) / 3600 : 0;
+      budget.charge(cost);
+      const code = Number(r.exit_code), stderr = String(r.stderr);
+      const category: FailureCategory | null = code === 0 ? null : code === 124 || code === -1 ? "timeout" : /CUDA out of memory|OutOfMemoryError/.test(stderr) ? "resource_limit" : "experiment_error";
+      return { exitCode: code, stdout: String(r.stdout), stderr, elapsedS: elapsed, costUsd: cost, files: (r.files ?? {}) as Record<string, string>, category };
+    }
+    if (Date.now() > deadline) { await gw(`/cancel?id=${encodeURIComponent(id)}`, { method: "POST" }); return { exitCode: -1, stdout: "", stderr: "job exceeded its deadline and was cancelled", elapsedS: run.timeoutS, costUsd: 0, files: {}, category: "timeout" }; }
+    await new Promise((res) => setTimeout(res, 15_000));
+  }
+}
+
+export async function gatewayCheck(): Promise<{ ok: boolean; error?: string }> {
+  const r = await gw("/health");
+  return r.ok ? { ok: true } : { ok: false, error: String(r.error) };
+}
+
 export async function modalCheck(): Promise<{ ok: boolean; error?: string }> {
   const r = await call({ op: "check" }, 120_000);
   return r.ok ? { ok: true } : { ok: false, error: String(r.error) };
