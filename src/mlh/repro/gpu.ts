@@ -95,9 +95,15 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     const mi = s.argv.indexOf("-m");
     const modPath = mi > 0 ? (s.argv[mi + 1] ?? "").split(".").join("/") : "";
     const top = modPath.split("/")[0] ?? "";
-    const inRepo = (p: string) => !!o.exists && (o.exists(typeof s.cwd === "string" ? `${s.cwd}/${p}` : p) || o.exists(p));
+    // The repository is mounted at /work in the container: "/work/x" is the repository path "x".
+    // A cwd under /cache (a data directory) is allowed; scripts are then not checked against the repository.
+    const rawCwd = typeof s.cwd === "string" ? s.cwd.replace(/\/+$/, "") : undefined;
+    const cwd = rawCwd === undefined || rawCwd === "/work" || rawCwd === "" || rawCwd === "." ? undefined : rawCwd.startsWith("/work/") ? rawCwd.slice(6) : rawCwd;
+    if (cwd !== undefined && (cwd.includes("..") || (cwd.startsWith("/") && !cwd.startsWith("/cache/")))) { errors.push(`${id}: cwd ${s.cwd} must be inside the repository (/work/...) or the cache (/cache/...)`); continue; }
+    const repoPath = (p: string) => (p.startsWith("/work/") ? p.slice(6) : p);
+    const inRepo = (p: string) => !!o.exists && (p.startsWith("/") && !p.startsWith("/work/") ? true : (cwd && !cwd.startsWith("/") ? o.exists(`${cwd}/${repoPath(p)}`) : false) || o.exists(repoPath(p)));
     const script = mi > 0 ? (inRepo(`${top}.py`) || inRepo(top) ? [`${modPath}.py`, `${modPath}/__init__.py`, `${modPath}/__main__.py`].find(inRepo) ?? `${modPath}.py` : undefined) : s.argv.find((a) => /\.(py|sh)$/.test(a));
-    if (o.exists && script && !inRepo(script)) { errors.push(`${id}: ${script} does not exist in the repository; use an existing script (data can be downloaded at run time by a stage with "network": true, restricted to data hosts)`); continue; }
+    if (o.exists && script && !(cwd?.startsWith("/cache/") && !script.startsWith("/work/")) && !inRepo(script)) { errors.push(`${id}: ${script} does not exist in the repository; use an existing script (data can be downloaded at run time by a stage with "network": true, restricted to data hosts)`); continue; }
     const timeoutS = Math.min(Math.max(Number(s.timeoutS) || 1800, 60), MAX_STAGE_S);
     const persist = (Array.isArray(s.persist) ? s.persist : []).map(String).filter((p) => !p.startsWith("/") && !p.includes(".."));
     // The cheapest GPU with enough memory, when the planner states the need.
@@ -111,7 +117,7 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     seen.add(id);
     stages.push({ id, argv: s.argv, timeoutS, needs, persist, ...(gpu ? { gpu } : {}), ...(mem > 0 ? { gpuMemGB: mem } : {}), ...(s.network ? { network: true } : {}), ...(s.perSeed ? { perSeed: true } : {}),
       ...(s.env && typeof s.env === "object" ? { env: Object.fromEntries(Object.entries(s.env).filter(([k, v]) => /^[A-Z_][A-Z0-9_]*$/.test(k) && typeof v === "string" && !/^(PATH|HOME|LD_|PYTHONHOME)/.test(k))) as Record<string, string> } : {}),
-      ...(typeof s.cwd === "string" && !s.cwd.startsWith("/") && !s.cwd.includes("..") ? { cwd: s.cwd } : {}) });
+      ...(cwd !== undefined ? { cwd } : {}) });
   }
   // Data: declared fetch items under /cache/data, from https URLs.
   const fetch: FetchItem[] = [];

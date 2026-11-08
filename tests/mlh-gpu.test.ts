@@ -53,6 +53,19 @@ describe("GPU plans", () => {
     expect(ok.plan!.claims.map((c) => c.claim)).toEqual(["mrpc", "rte"]);
   });
 
+  it("reads container paths under /work as repository paths (the SimCSE planner wrote cwd /work/SentEval/data/downstream)", () => {
+    const exists = (p: string) => ["SentEval/data/downstream/download_dataset.sh", "evaluation.py"].includes(p);
+    const plan = { fidelity: "eval_only", stages: [
+      { id: "fetch", argv: ["bash", "download_dataset.sh"], cwd: "/work/SentEval/data/downstream", timeoutS: 900, network: true, persist: [] },
+      { id: "eval", argv: ["python", "/work/evaluation.py"], cwd: "/work", gpu: "T4", timeoutS: 900, needs: ["fetch"], persist: [] },
+    ], claims: [{ claim: "ap", stage: "eval", parse: "x ([0-9.]+)" }] };
+    const r = validateGpuPlan(claims, plan, { budgetUsd: 5, price: gpuPrice, exists });
+    expect(r.errors).toEqual([]);
+    expect(r.plan!.stages[0]!.cwd).toBe("SentEval/data/downstream");
+    expect(r.plan!.stages[1]!.cwd).toBeUndefined();
+    expect(validateGpuPlan(claims, { ...plan, stages: [{ ...plan.stages[0], cwd: "/etc" }, plan.stages[1]] }, { budgetUsd: 5, price: gpuPrice, exists }).errors.join()).toMatch(/must be inside the repository/);
+  });
+
   it("assigns the cheapest GPU with enough memory when a stage states its need", () => {
     const r = v({ ...base, stages: [base.stages[0], { ...base.stages[1], gpu: "A100-40GB", gpuMemGB: 12 }] });
     expect(r.plan!.stages[1]!.gpu).toBe("T4");
