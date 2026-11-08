@@ -37,6 +37,8 @@ export interface LoopOptions {
   paper?: string; // full paper text for read_paper
   sandboxFault?: () => boolean;
   crashAfterSteps?: number;
+  // Resuming a finished conversation to keep working: appended as a user message before the next step.
+  continueWith?: string;
   // Remote execution (e.g. Modal): `run` uploads the working copy and runs there (optionally on a GPU);
   // `install` adds packages to the remote image instead of a local site.
   remote?: {
@@ -86,6 +88,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     st = { messages: [{ role: "system", content: o.role.system }, { role: "user", content: o.task }], step: 0, stats: { runs: 0, ms: 0 }, ...(o.site ? { site: o.site } : {}), ...(o.remote ? { pip: [...o.remote.pip] } : {}) };
   }
   const state = st;
+  if (o.continueWith && resumedAt !== undefined) state.messages = [...state.messages, { role: "user", content: o.continueWith }];
   const limits = o.limits ?? DEFAULT_LIMITS;
   const sandbox = (timeoutS?: number) => Sandbox.attach(ws, { isolation: o.isolation, limits: { ...limits, ...(timeoutS ? { timeoutMs: Math.min(timeoutS * 1000, limits.timeoutMs) } : {}) }, stats: state.stats, ...(state.site ? { site: state.site } : {}), ...(o.sandboxFault ? { fault: o.sandboxFault } : {}) });
   const save = () => {

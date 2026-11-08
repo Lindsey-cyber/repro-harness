@@ -126,7 +126,13 @@ const env: Skill = {
   output: any,
   async run(ctx) {
     const remote = need(ctx).gpu ? " Commands run in a remote Linux container with CUDA PyTorch 2.5.1 preinstalled; the packages you install are added to the remote image used by every later stage. Check imports on CPU; use a GPU only for a short probe if needed." : "";
-    const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, []), role: ENV_ROLE, workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}` });
+    const base = { ...loopBase(ctx), ...remoteFor(ctx, []), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}` };
+    let r = await agentLoop({ ...base, role: ENV_ROLE });
+    // Complex repositories need more than one step budget: an agent that stopped at its limit with the
+    // experiment still not runnable continues from its checkpoint (two more rounds at most).
+    for (let round = 2; round <= 3 && r.report && r.report.runnable === false && r.steps >= ENV_ROLE.maxSteps * (round - 1); round++) {
+      r = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: ENV_ROLE.maxSteps * round }, continueWith: `The experiment is not runnable yet. Continue from where you stopped: resolve the remaining problems (${JSON.stringify((r.report.problems as { category: string }[] | undefined)?.map((p) => p.category) ?? [])}), verify by starting the documented command, then report again.` });
+    }
     if (!r.report) throw new SkillError("experiment_error", "environment agent ran out of steps without a report");
     return { output: { ...r.report, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, steps: r.steps } };
   },
