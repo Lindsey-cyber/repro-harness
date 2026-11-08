@@ -198,6 +198,8 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             out = `unknown tool ${String(name)}`;
         }
       } catch (e) {
+        // Out of credit (GPU or model provider): the run must stop, not hand the error to the agent to retry.
+        if ((e instanceof SkillError && e.category === "provider_fatal") || /Insufficient Balance/.test(String(e))) throw e;
         out = `error: ${String(e instanceof SkillError ? e.message : (e as Error).message ?? e)}`;
       }
       next.push({ role: "tool", tool_call_id: call.id, content: out });
