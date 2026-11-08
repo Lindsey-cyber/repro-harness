@@ -151,7 +151,7 @@ async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteR
     // What ran before the failure is charged.
     const ranS = Number(r.elapsed_s) || 0;
     if (run.gpu && ranS) budget.charge((gpuPrice(run.gpu) * ranS) / 3600);
-    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: run.gpu ? (gpuPrice(run.gpu) * ranS) / 3600 : 0, files: {}, category: /ImageBuildError|Image build/.test(head) ? "experiment_error" : /\b(AuthError|Token (ID|secret)|Unauthenticated)\b/.test(head) ? "precondition" : /^(\w+\.)*(Timeout|SandboxTimeout|ExecTimeout)\w*Error|timed out|deadline exceeded/i.test(head) ? "timeout" : "sandbox_transient" };
+    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: run.gpu ? (gpuPrice(run.gpu) * ranS) / 3600 : 0, files: {}, category: /ResourceExhausted|spending limit|exceeded its spe|billing|insufficient (funds|credit)/i.test(head) ? "provider_fatal" : /ImageBuildError|Image build/.test(head) ? "experiment_error" : /\b(AuthError|Token (ID|secret)|Unauthenticated)\b/.test(head) ? "precondition" : /^(\w+\.)*(Timeout|SandboxTimeout|ExecTimeout)\w*Error|timed out|deadline exceeded/i.test(head) ? "timeout" : "sandbox_transient" };
   }
   const elapsed = Number(r.elapsed_s), cost = run.gpu ? (gpuPrice(run.gpu) * elapsed) / 3600 : 0;
   budget.charge(cost);

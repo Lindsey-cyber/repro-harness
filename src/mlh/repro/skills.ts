@@ -67,6 +67,7 @@ const remoteFor = (ctx: SkillCtx, pip: string[], image?: string) => {
   if (!g) return {};
   return { remote: { pip, gpus: GPUS, images: IMAGES, image: image ?? DEFAULT_IMAGE_KEY, run: async (ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[]; image?: string }) => {
     const r = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: o.timeoutS, network: true, pip: o.pip, image: IMAGES[o.image ?? DEFAULT_IMAGE_KEY]!, ...(o.gpu ? { gpu: o.gpu } : {}) }, g.budget);
+    if (r.category === "provider_fatal") throw new SkillError("provider_fatal", r.stderr.slice(0, 300)); // out of GPU credit: stop, do not let the agent keep trying
     return { code: r.exitCode, stdout: r.stdout, stderr: r.stderr, category: r.category, costUsd: r.costUsd };
   } } };
 };

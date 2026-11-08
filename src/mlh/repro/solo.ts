@@ -62,6 +62,7 @@ export async function runSolo(o: { source: string; arxiv: string; objective: str
       isolation: st.isolation, isolationEvidence: { kind: "deterministic", check: "selftest", ok: st.isolation === "namespace" },
       remote: { pip: [], gpus: GPUS, images: IMAGES, image: DEFAULT_IMAGE_KEY, run: async (ws, command, ro) => {
         const res = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: ro.timeoutS, network: true, pip: ro.pip, image: IMAGES[ro.image ?? DEFAULT_IMAGE_KEY]!, ...(ro.gpu ? { gpu: ro.gpu } : {}) }, budget);
+        if (res.category === "provider_fatal") throw new Error(`Insufficient Balance (GPU provider): ${res.stderr.slice(0, 200)}`);
         return { code: res.exitCode, stdout: res.stdout, stderr: res.stderr, category: res.category, costUsd: res.costUsd };
       } },
     });
