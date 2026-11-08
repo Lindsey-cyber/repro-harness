@@ -81,3 +81,61 @@ Only the install sandbox gets network, and only through the proxy. `tests/mlh-st
 - **team:** this harness.
 
 Results are in `bench/repro/results/`; their analysis is at the end of this file once measured.
+
+## Results (bench/repro, 10 real tasks; `bench/repro/results/`)
+
+The benchmark has 6 pristine paper+repo tasks (SGC, two GCN implementations, GCNII, APPNP, Fashion-MNIST) and 4 injected variants (API drift, train/test overlap, eval-path defect, resource limit). A separate agent built it: it did the reference reproductions through the sandbox, and the scoring rules in SPEC.md were fixed before any system ran. Each mode ran once per task, so these are single samples.
+
+| | script (oracle claims) | solo agent (v2) | team (v2) | team (v3, after 2 bug fixes) |
+|---|---|---|---|---|
+| tasks solved | 0/10 | 6/10 | 6/10 | 5/10 |
+| claim status accuracy | 0.00 | 0.87 | 0.87 | 0.73 |
+| claim extraction from the PDF | (given) | 0.93 | 1.00 | 1.00 |
+| root-cause recall / precision | 0 / — | 0.72 / 0.54 | 0.85 / 0.33 | 0.87 / 0.35 |
+| injected defects fixed (hidden fix check) | 0/4 | 4/4 | 4/4 | 4/4 |
+| high-risk changes that need a human | — | not tracked: edits freely | 9 | 11 |
+| median wall time per task | 13 s | 1602 s | 519 s | 589 s |
+| LLM tokens / estimated cost | 0 | 13.5M / $0.47 | 12.7M / $0.55 | 12.4M / $0.56 |
+| unsafe actions | 0 | 0 | 0 | 0 |
+
+### What the numbers say, and what they do not
+
+- **Both agent systems clearly beat the deterministic workflow.** That workflow solves nothing: pinned requirements no longer install on Python 3.13, imports fail, and runners never exit.
+- **Team vs solo: no measured difference in correctness.** 6 vs 6 solved and equal status accuracy, with team v3 at 5/10. With n = 10 and one sample each, a one-task swing is noise. I claim no improvement.
+- **What the team measurably adds is structure, not accuracy:**
+  - **Time:** median wall time is 3× lower, from seeds running in parallel as separate nodes.
+  - **Recovery:** a real one. A team run killed by the 2-hour limit resumed from its journal and agent checkpoints and solved the task (Fashion-MNIST, v2). The solo agent has no equivalent.
+  - **Authorization:** 9–11 changes touched evaluation, split or seed code. Under the default policy each needs a human approval, so the team knows when its autonomy should stop. The solo agent made such edits silently. Its patches were also correct in 4/4 cases, so on this benchmark the gate cost approvals and caught no bad change.
+  - **Root-cause recall is higher (0.85 vs 0.72), but precision is lower (0.33 vs 0.54):** the environment agent and the debuggers each report causes, and the union over-reports.
+- **The failures are mostly not reasoning failures.**
+  - In v2/v3, most unsolved team tasks had every status right and missed a root-cause category. Most often that was `env.missing_dependency`: the environment agent installs the package and files the cause as something else.
+  - GCNII's hard-coded CUDA was reported as `run.crash` where the reference says `other:hardcoded_cuda`. That is a vocabulary ambiguity in the ground truth as much as an error.
+
+### Bugs this benchmark found in the harness (all fixed, with tests)
+
+1. A tool call with malformed JSON arguments was read as an empty report: the planner's report was lost.
+2. A planner could put code changes into `python -c` inline programs, bypassing patch review. Run commands must now launch repository scripts.
+3. A run's `PYTHONPATH` replaced the package site instead of extending it, so torch went missing.
+4. A command-only fix (no file change) was never measured again, because run ids collided.
+5. One package site per distinct package set filled 24 GB with copies of torch and the disk filled mid-benchmark. Sites are now layered: a hard-linked subset plus the missing packages, built in about 2 s.
+6. The sandbox wrapper's `set -e` lost the exit marker of a failing command, so `cd` failures were misread as transient sandbox faults and retried.
+7. Provider-outage retries had the same small budget as other failures even though agent nodes resume from checkpoints. The budget is now 3× larger.
+
+### Reliability experiment: inconclusive, needs a rerun
+
+The run used a 10% injected provider-outage rate on 3 tasks.
+- The **solo** agent failed all 3. It restarts from scratch on every outage and never got through about 60 steps.
+- The **team** also solved none, for reasons that were harness bugs rather than the design: bugs 6 and 7, plus a planner that wrote the placeholder `<repo root>` as the working directory (now rejected).
+- The provider account then ran out of balance (HTTP 402) during the last task.
+
+So the experiment says nothing yet about the design. Rerun it after the fixes:
+
+```bash
+MLH_LLM_SALT=faults2 npm run mlh -- repro-bench --modes solo,team --label faults10b --provider-faults 0.1 --tasks sgc_citation_pristine,gcn_dragen1860_pristine,sgc_citation_inj_evalpath
+```
+
+### Honest caveats
+
+- All of v2 → v3 and the fixes above came from failures on this same benchmark, so v3 is not a blind number.
+- A fresh held-out set of real repositories is needed before claiming generalization.
+- Ten tasks, mostly graph learning on Cora-family data, is a narrow domain.

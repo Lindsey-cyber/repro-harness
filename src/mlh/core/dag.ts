@@ -113,7 +113,9 @@ export function apply(s: RunState, e: RunEvent): RunState {
     case "fail": {
       const ns = need(s, e.id);
       ns.failures.push({ category: e.category, message: e.message });
-      const retry = RETRYABLE.includes(e.category) && ns.attempts < s.maxAttempts;
+      // Provider outages get a larger budget: agent nodes resume from their last checkpoint, so a retry is cheap.
+      const budget = e.category === "provider_transient" ? s.maxAttempts * 3 : s.maxAttempts;
+      const retry = RETRYABLE.includes(e.category) && ns.attempts < budget;
       ns.status = retry ? "pending" : "failed";
       break;
     }
@@ -144,7 +146,7 @@ export function replay(events: RunEvent[], maxAttempts = 3): RunState {
   for (const e of events) apply(s, e);
   // A node that was running when the process died gets another attempt; skills
   // run in fresh sandboxes, so re-running is idempotent.
-  for (const ns of s.nodes.values()) if (ns.status === "running") ns.status = ns.attempts < maxAttempts ? "pending" : "failed";
+  for (const ns of s.nodes.values()) if (ns.status === "running") ns.status = ns.attempts < maxAttempts * 3 ? "pending" : "failed";
   return s;
 }
 

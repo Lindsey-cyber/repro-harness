@@ -104,7 +104,7 @@ export class Sandbox {
     const ca = this.network && process.env.SSL_CERT_FILE && existsSync(process.env.SSL_CERT_FILE) ? 'mount --bind "$CA" /etc/ssl/certs/ca-certificates.crt; ' : "";
     const script = 'set -e; mount --bind "$W" /mnt; mount --bind "$P" /srv; mount -o remount,bind,ro /srv; ' + site + ca +
       "mount -t tmpfs none /tmp; mount -t tmpfs none /home; mount -t tmpfs none /root; mount -o remount,bind,ro /; " +
-      'cd /mnt; "$@"; s=$?; echo "MLH_EXIT=$s" >&2; exit $s';
+      'cd /mnt; set +e; "$@"; s=$?; echo "MLH_EXIT=$s" >&2; exit $s';
     return ["unshare", "-r", ...(this.network ? [] : ["-n"]), "-m", "--fork", "sh", "-c", script, "sh", ...lim, ...cmd];
   }
 

@@ -120,6 +120,9 @@ const plan: Skill = {
     const site = currentSite(ctx.state);
     const r = await agentLoop({ ...loopBase(ctx), role: PLAN_ROLE, workDir: ctx.workDir(), source: need(ctx).versionDir(0), ...(site ? { site } : {}), task: `Objective: ${ctx.state.objective}\nClaims (values are fractions):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, installed: e.specs })}` });
     const v = validatePlan(cs, r.report);
+    // A working directory must exist in the repository (a planner once wrote the placeholder "<repo root>").
+    const src0 = need(ctx).versionDir(0);
+    for (const sp of [...v.specs]) if (sp.cwd && !existsSync(join(src0, sp.cwd))) { v.errors.push(`${sp.claim}: cwd ${sp.cwd} does not exist`); v.specs.splice(v.specs.indexOf(sp), 1); }
     if (!v.specs.length) { rmSync(join(ctx.workDir(), "state.json"), { force: true }); throw new SkillError("contract_violation", `invalid plan: ${v.errors.join("; ")}`); }
     return { output: { specs: v.specs, errors: v.errors } };
   },

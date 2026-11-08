@@ -49,6 +49,13 @@ describe("sandbox", async () => {
     expect(r.ms).toBeLessThan(5000);
   });
 
+  it("reports a failing command's real exit status, so it is not mistaken for a sandbox fault", async () => {
+    const src = tmp();
+    const sb = Sandbox.create(tmp(), "t", src, { isolation: st.isolation, limits: DEFAULT_LIMITS, stats: { runs: 0, ms: 0 } });
+    const r = await sb.run(["sh", "-c", 'cd "$1" && exec true', "sh", "<repo root>"]);
+    expect(r.category).toBe("experiment_error");
+  });
+
   it("classifies a CPU-limit kill as resource_limit", async () => {
     const src = tmp();
     writeFileSync(join(src, "spin.py"), "while True: pass\n");

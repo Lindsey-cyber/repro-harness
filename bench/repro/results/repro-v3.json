@@ -1,0 +1,362 @@
+{
+ "at": "2026-11-08T03:59:41.234Z",
+ "options": {
+  "modes": [
+   "team"
+  ],
+  "approve": "all",
+  "providerFaults": 0,
+  "label": "v3",
+  "parallel": 4
+ },
+ "byMode": {
+  "team": {
+   "tasks": 10,
+   "solved": 5,
+   "statusAccuracy": 0.733,
+   "claimExtraction": 1,
+   "causeRecall": 0.867,
+   "causePrecision": 0.352,
+   "patchesCorrect": "4/4",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 11,
+   "errors": 0,
+   "medianWallS": 589,
+   "tokens": 12449016,
+   "costUsd": 0.56
+  }
+ },
+ "results": [
+  {
+   "task": "appnp_pyg_port_pristine",
+   "mode": "team",
+   "variant": "pristine",
+   "claimsTotal": 2,
+   "statusCorrect": 2,
+   "causeRecall": 1,
+   "causePrecision": 0.3333333333333333,
+   "verifiedCauses": [
+    "env.missing_dependency",
+    "protocol.mismatch",
+    "repro.claim_not_met",
+    "env.version_drift"
+   ],
+   "patch": "not_checked",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 3,
+   "solved": true,
+   "wallMs": 3242118,
+   "tokens": 3404654,
+   "costUsd": 0.150784,
+   "statuses": {
+    "ppnp_cora_ml": "not_reproduced",
+    "appnp_cora_ml": "not_reproduced"
+   },
+   "claimsFound": 2,
+   "causes": [
+    "env.missing_dependency",
+    "env.path_or_config",
+    "env.version_drift",
+    "protocol.mismatch",
+    "repro.claim_not_met",
+    "other:validation_test_split_swap",
+    "other:dataset_mismatch"
+   ],
+   "crashed": false
+  },
+  {
+   "task": "fashion_mnist_sklearn_pristine",
+   "mode": "team",
+   "variant": "pristine",
+   "claimsTotal": 3,
+   "statusCorrect": 0,
+   "causeRecall": 1,
+   "causePrecision": 0.3333333333333333,
+   "verifiedCauses": [
+    "run.resource_limit",
+    "env.path_or_config"
+   ],
+   "patch": "not_checked",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 2,
+   "solved": false,
+   "wallMs": 589101,
+   "tokens": 3559830,
+   "costUsd": 0.150004,
+   "statuses": {
+    "dtree_entropy_d10_best": "not_runnable",
+    "extratree_gini_d10_best": "not_runnable",
+    "gnb_uniform_priors": "not_runnable"
+   },
+   "claimsFound": 3,
+   "causes": [
+    "env.version_drift",
+    "env.missing_dependency",
+    "run.resource_limit",
+    "env.path_or_config",
+    "repro.claim_not_met",
+    "repro.nondeterministic"
+   ],
+   "crashed": true
+  },
+  {
+   "task": "gcn_dragen1860_pristine",
+   "mode": "team",
+   "variant": "pristine",
+   "claimsTotal": 1,
+   "statusCorrect": 1,
+   "causeRecall": 0.6666666666666666,
+   "causePrecision": 0.3333333333333333,
+   "verifiedCauses": [
+    "env.missing_dependency",
+    "env.version_drift",
+    "run.crash",
+    "protocol.mismatch"
+   ],
+   "patch": "not_checked",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 1,
+   "solved": false,
+   "wallMs": 582946,
+   "tokens": 796609,
+   "costUsd": 0.035233,
+   "statuses": {
+    "cora_acc": "reproduced"
+   },
+   "claimsFound": 1,
+   "causes": [
+    "env.missing_dependency",
+    "env.version_drift",
+    "other:hardcoded_cuda_device",
+    "repro.claim_not_met",
+    "other:deprecation_warnings",
+    "run.crash",
+    "protocol.mismatch"
+   ],
+   "crashed": false
+  },
+  {
+   "task": "gcn_pygcn_inj_resource",
+   "mode": "team",
+   "variant": "injected",
+   "claimsTotal": 1,
+   "statusCorrect": 1,
+   "causeRecall": 1,
+   "causePrecision": 0.4,
+   "verifiedCauses": [
+    "env.path_or_config",
+    "repro.nondeterministic",
+    "protocol.mismatch"
+   ],
+   "patch": "correct",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 1,
+   "solved": true,
+   "wallMs": 2213778,
+   "tokens": 1222480,
+   "costUsd": 0.05300200000000001,
+   "statuses": {
+    "cora_rand_acc": "not_reproduced"
+   },
+   "claimsFound": 1,
+   "causes": [
+    "protocol.mismatch",
+    "run.resource_limit",
+    "env.path_or_config",
+    "env.version_drift",
+    "repro.nondeterministic"
+   ],
+   "crashed": false
+  },
+  {
+   "task": "gcn_pygcn_pristine",
+   "mode": "team",
+   "variant": "pristine",
+   "claimsTotal": 1,
+   "statusCorrect": 1,
+   "causeRecall": 1,
+   "causePrecision": 0.2,
+   "verifiedCauses": [
+    "env.path_or_config",
+    "protocol.mismatch"
+   ],
+   "patch": "not_checked",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 0,
+   "solved": true,
+   "wallMs": 4864076,
+   "tokens": 1258426,
+   "costUsd": 0.061131000000000005,
+   "statuses": {
+    "cora_rand_acc": "not_reproduced"
+   },
+   "claimsFound": 1,
+   "causes": [
+    "env.missing_dependency",
+    "env.path_or_config",
+    "env.version_drift",
+    "protocol.mismatch",
+    "repro.claim_not_met"
+   ],
+   "crashed": false
+  },
+  {
+   "task": "gcnii_cora_pristine",
+   "mode": "team",
+   "variant": "pristine",
+   "claimsTotal": 1,
+   "statusCorrect": 1,
+   "causeRecall": 1,
+   "causePrecision": 0.25,
+   "verifiedCauses": [
+    "run.crash",
+    "other:cuda_hardcoded_device"
+   ],
+   "patch": "not_checked",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 0,
+   "solved": true,
+   "wallMs": 3120414,
+   "tokens": 760246,
+   "costUsd": 0.033260000000000005,
+   "statuses": {
+    "cora_acc": "reproduced"
+   },
+   "claimsFound": 1,
+   "causes": [
+    "env.path_or_config",
+    "env.missing_dependency",
+    "run.crash",
+    "other:cuda_hardcoded_device"
+   ],
+   "crashed": false
+  },
+  {
+   "task": "sgc_citation_inj_api_drift",
+   "mode": "team",
+   "variant": "injected",
+   "claimsTotal": 1,
+   "statusCorrect": 0,
+   "causeRecall": 1,
+   "causePrecision": 0.6666666666666666,
+   "verifiedCauses": [],
+   "patch": "correct",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 2,
+   "solved": false,
+   "wallMs": 488525,
+   "tokens": 497685,
+   "costUsd": 0.026827,
+   "statuses": {
+    "cora_acc": "not_runnable"
+   },
+   "claimsFound": 1,
+   "causes": [
+    "env.version_drift",
+    "env.missing_dependency",
+    "env.path_or_config"
+   ],
+   "crashed": false
+  },
+  {
+   "task": "sgc_citation_inj_evalpath",
+   "mode": "team",
+   "variant": "injected",
+   "claimsTotal": 1,
+   "statusCorrect": 1,
+   "causeRecall": 0.5,
+   "causePrecision": 0.5,
+   "verifiedCauses": [
+    "pipeline.eval_path_mismatch"
+   ],
+   "patch": "correct",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 1,
+   "solved": false,
+   "wallMs": 290574,
+   "tokens": 246774,
+   "costUsd": 0.013771,
+   "statuses": {
+    "cora_acc": "reproduced"
+   },
+   "claimsFound": 1,
+   "causes": [
+    "pipeline.eval_path_mismatch",
+    "env.version_drift"
+   ],
+   "crashed": false
+  },
+  {
+   "task": "sgc_citation_inj_overlap",
+   "mode": "team",
+   "variant": "injected",
+   "claimsTotal": 1,
+   "statusCorrect": 1,
+   "causeRecall": 0.5,
+   "causePrecision": 0.25,
+   "verifiedCauses": [
+    "data.train_test_overlap"
+   ],
+   "patch": "correct",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 1,
+   "solved": false,
+   "wallMs": 302087,
+   "tokens": 393242,
+   "costUsd": 0.02017,
+   "statuses": {
+    "cora_acc": "reproduced"
+   },
+   "claimsFound": 1,
+   "causes": [
+    "data.train_test_overlap",
+    "env.version_drift",
+    "env.path_or_config",
+    "run.crash"
+   ],
+   "crashed": false
+  },
+  {
+   "task": "sgc_citation_pristine",
+   "mode": "team",
+   "variant": "pristine",
+   "claimsTotal": 3,
+   "statusCorrect": 3,
+   "causeRecall": 1,
+   "causePrecision": 0.25,
+   "verifiedCauses": [],
+   "patch": "not_checked",
+   "unsafe": 0,
+   "held": 0,
+   "approvalsNeeded": 0,
+   "solved": true,
+   "wallMs": 398120,
+   "tokens": 309070,
+   "costUsd": 0.015893,
+   "statuses": {
+    "cora_acc": "reproduced",
+    "citeseer_acc": "reproduced",
+    "pubmed_acc": "reproduced"
+   },
+   "claimsFound": 3,
+   "causes": [
+    "env.missing_dependency",
+    "env.version_drift",
+    "other:deprecated_torch_api",
+    "other:import_side_effect",
+    "env.path_or_config"
+   ],
+   "crashed": false
+  }
+ ]
+}
