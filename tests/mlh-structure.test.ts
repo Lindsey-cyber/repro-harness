@@ -28,7 +28,7 @@ describe("ml harness structure", () => {
     // On this machine, only the install sandbox ever gets network.
     expect(files("src/mlh").filter((f) => /Sandbox\.(create|attach)\([^)]*network: true/s.test(code(f)) || /network: true/.test(code(f)) && /Sandbox\./.test(code(f)) && f !== "src/mlh/repro/skills.ts")).toEqual(["src/mlh/repro/site.ts"]);
     // Remote containers (Modal; isolated, no credentials inside) get network only from the reproduction skills.
-    expect(files("src/mlh").filter((f) => /modalRun\([^;]*network: (true|!!)/s.test(code(f)))).toEqual(["src/mlh/repro/skills.ts"]);
+    expect(files("src/mlh").filter((f) => /modalRun\([^;]*network: (true|!!)/s.test(code(f)))).toEqual(["src/mlh/repro/skills.ts", "src/mlh/repro/solo.ts"]); // the solo baseline's agent gets the same remote tools as the team's
   });
 
   it("starts processes in exactly one module", () => {

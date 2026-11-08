@@ -62,10 +62,16 @@ async function main(): Promise<void> {
       console.log(`approved ${id}; run \`npm run mlh -- resume ${runDir}\``);
       break;
     }
+    case "solo": {
+      // Single-agent baseline on one paper (remote GPUs, same budget, verified by rerun).
+      const { runSolo } = await import("./repro/solo.ts");
+      await runSolo({ source: positional[0]!, arxiv: flag("arxiv")!, objective: flag("objective")!, budgetUsd: Number(flag("gpu-budget") ?? 5), runDir: flag("run-dir")! });
+      break;
+    }
     case "campaign": {
       // Reproduce a queue of papers unattended: mlh campaign bench/complex/campaign.json --label c1 [--parallel 2]
       const { runCampaign } = await import("./repro/campaign.ts");
-      await runCampaign({ config: positional[0]!, label: flag("label") ?? "campaign", parallel: Number(flag("parallel") ?? 2), out: flag("out") ?? "bench/complex/results" });
+      await runCampaign({ config: positional[0]!, label: flag("label") ?? "campaign", parallel: Number(flag("parallel") ?? 2), out: flag("out") ?? "bench/complex/results", mode: (flag("mode") as "team" | "solo" | undefined) ?? "team" });
       break;
     }
     case "repro-bench": {

@@ -112,7 +112,7 @@ function render(rows: Record<string, unknown>[]): string {
   ].join("\n");
 }
 
-export async function runCampaign(o: { config: string; label: string; parallel: number; out: string }): Promise<void> {
+export async function runCampaign(o: { config: string; label: string; parallel: number; out: string; mode?: "team" | "solo" }): Promise<void> {
   const papers = JSON.parse(readFileSync(o.config, "utf8")) as Paper[];
   const base = join(ROOT, ".mlh", "campaign", o.label);
   mkdirSync(base, { recursive: true });
@@ -129,9 +129,11 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
       let resumes = 0;
       try {
         const src = await prepare(p);
-        let r = await runChild(existsSync(join(runDir, "journal.jsonl")) ? ["resume", runDir, "--llm"] : ["repro", src, "--arxiv", p.arxiv, "--objective", p.objective, "--llm", "--gpu-budget", String(p.budgetUsd ?? 5), "--run-dir", runDir], runDir, log);
+        // The solo baseline has no journal to resume from: one attempt, as a single agent would get.
+        if (o.mode === "solo") { await runChild(["solo", src, "--arxiv", p.arxiv, "--objective", p.objective, "--gpu-budget", String(p.budgetUsd ?? 5), "--run-dir", runDir], runDir, log); }
+        let r = o.mode === "solo" ? { code: 0, killedForStall: false } : await runChild(existsSync(join(runDir, "journal.jsonl")) ? ["resume", runDir, "--llm"] : ["repro", src, "--arxiv", p.arxiv, "--objective", p.objective, "--llm", "--gpu-budget", String(p.budgetUsd ?? 5), "--run-dir", runDir], runDir, log);
         // Killed for a stall or crashed: resume from the journal (at most twice).
-        while ((r.killedForStall || r.code !== 0) && !existsSync(join(runDir, "stopped.json")) && resumes < 2) {
+        while (o.mode !== "solo" && (r.killedForStall || r.code !== 0) && !existsSync(join(runDir, "stopped.json")) && resumes < 2) {
           resumes++;
           r = await runChild(["resume", runDir, "--llm"], runDir, log);
         }
