@@ -114,7 +114,9 @@ export class Sandbox {
       ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY, https_proxy: process.env.HTTPS_PROXY } : {}),
       ...(process.env.SSL_CERT_FILE ? { CA: process.env.SSL_CERT_FILE, SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt", PIP_CERT: "/etc/ssl/certs/ca-certificates.crt", REQUESTS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt" } : {}),
     } : {};
-    const full = { ...BASE_ENV, ...(this.site ? { PYTHONPATH: "/opt:/mnt", S: this.site } : {}), ...net, ...env, W: this.dir, P: PROBES };
+    // A caller's PYTHONPATH extends the installed packages instead of hiding them.
+    const pp = this.site ? { PYTHONPATH: env.PYTHONPATH ? `${env.PYTHONPATH}:/opt:/mnt` : "/opt:/mnt", S: this.site } : {};
+    const full = { ...BASE_ENV, ...net, ...env, ...pp, W: this.dir, P: PROBES };
     const r = await runProc(this.wrap(cmd), { cwd: this.dir, env: full, timeoutMs: this.limits.timeoutMs });
     this.stats.runs++; this.stats.ms += r.ms;
     return { ...r, category: classify(r) };

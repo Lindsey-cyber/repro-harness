@@ -84,9 +84,24 @@ describe("reproduction: deciding code", () => {
     ok(`${N.debug}:cora:v0`, { hasPatch: true, claim: "cora" });
     expect(s.nodes.has(`${N.patch}:cora:v0`)).toBe(true);
     ok(`${N.patch}:cora:v0`, { accepted: true, version: 1 });
-    expect([...s.nodes.keys()].filter((k) => k.includes(":v1:"))).toHaveLength(3);
+    expect([...s.nodes.keys()].filter((k) => k.startsWith(`${N.run}:cora:v1`))).toHaveLength(3);
     // Until the new version's runs complete, the newest completed comparison stands.
     expect(finalStatus(s).cora).toMatchObject({ status: "not_reproduced", version: 0 });
+  });
+
+  it("measures again after a command-only change (no new source version)", () => {
+    const s = replay([{ t: "run", at, objective: "o", source: "s", mode: "repro" }, ...initialNodes().map((node) => ({ t: "node" as const, at, node, why: "" }))]);
+    const ok = (id: string, output: unknown) => { apply(s, { t: "ok", at, id, output, findings: [], artifacts: [] }); for (const node of afterOk(s, id)) apply(s, { t: "node", at, node, why: "" }); };
+    ok(N.paper, {}); ok(N.env, {}); ok(N.claims, { claims: [claim] }); ok(N.plan, { specs: [{ claim: "cora", argv: ["x"], seeds: [0, 1, 2], parse: "(x)", timeoutS: 60 }] });
+    for (const r of [...s.nodes.keys()].filter((k) => k.startsWith(N.run))) ok(r, { value: 0.83 });
+    ok(`${N.compare}:cora:v0`, { status: "not_reproduced", mean: 0.83, values: [] });
+    ok(`${N.debug}:cora:v0`, { hasPatch: true, claim: "cora" });
+    ok(`${N.patch}:cora:v0`, { accepted: true, argv: { cora: ["y"] } });
+    const again = [...s.nodes.keys()].filter((k) => k.startsWith(`${N.run}:cora:v0.p1`));
+    expect(again).toHaveLength(3);
+    for (const r of again) ok(r, { value: 0.815 });
+    ok(`${N.compare}:cora:v0.p1`, { status: "reproduced", mean: 0.815, values: [] });
+    expect(finalStatus(s).cora!.status).toBe("reproduced");
   });
 
   it("debugs a run that keeps failing, at most twice per claim, then reports the claim not runnable", () => {

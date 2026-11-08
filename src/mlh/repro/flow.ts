@@ -104,8 +104,10 @@ export function afterOk(s: RunState, id: string): TaskNode[] {
   }
   if (n.skill === N.patch) {
     const p = s.nodes.get(id)!.output as PatchOut;
-    // An accepted patch is a new source version: every claim is measured again on it.
-    return p.accepted ? runNodes(s, specsOf(s).map((x) => x.claim), "") : [];
+    // An accepted change (new source version or new command) means every claim is measured again.
+    // Runs are tagged by the patch count, so a command-only change does not collide with earlier runs.
+    const k = s.order.filter((x) => x.startsWith(N.patch) && (s.nodes.get(x)!.output as PatchOut | undefined)?.accepted).length;
+    return p.accepted ? runNodes(s, specsOf(s).map((x) => x.claim), `.p${k}`) : [];
   }
   return [];
 }
@@ -123,7 +125,8 @@ export function finalStatus(s: RunState): Record<string, { status: Status | "pen
   const res: Record<string, { status: Status | "pending"; version: number; mean?: number; values?: number[]; node?: string }> = {};
   for (const c of claimsOf(s)) {
     const cmp = s.order.filter((id) => id.startsWith(`${N.compare}:${c.id}:`));
-    const done = cmp.filter((id) => ok(s, id)).map((id) => ({ id, v: Number(s.nodes.get(id)!.node.params.version), o: out<{ status: Status; mean: number; values: number[] }>(s, id)! })).sort((a, b) => b.v - a.v);
+    // Newest version first; within a version, the latest comparison (after the latest accepted change).
+    const done = cmp.filter((id) => ok(s, id)).map((id) => ({ id, v: Number(s.nodes.get(id)!.node.params.version), i: s.order.indexOf(id), o: out<{ status: Status; mean: number; values: number[] }>(s, id)! })).sort((a, b) => b.v - a.v || b.i - a.i);
     const pending = [...s.nodes.values()].some((x) => x.status === "held" || x.status === "pending" || x.status === "running");
     if (done[0]) res[c.id] = { status: done[0].o.status, version: done[0].v, mean: done[0].o.mean, values: done[0].o.values, node: done[0].id };
     else res[c.id] = { status: pending ? "pending" : "not_runnable", version: currentVersion(s).version };
