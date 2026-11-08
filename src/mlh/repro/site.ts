@@ -48,13 +48,25 @@ export function siteManager(root: string, o: { isolation: Isolation; stats: Sand
       }
       try {
         rmSync(site, { recursive: true, force: true });
-        mkdirSync(site, { recursive: true });
+        // Layering: start from the largest existing site whose packages are a subset of ours (hard-linked, so
+        // torch is not copied again) and install only what is missing. A superset is never used: packages
+        // nobody asked for would hide a missing dependency.
+        const peers = readdirSync(root).filter((d) => d !== key && existsSync(join(root, d, ".mlh-specs.json")));
+        const mine = new Set(specs.map(norm));
+        const base = peers.map((d) => ({ d, sp: specsOf(join(root, d)) })).filter((p) => p.sp.every((x) => mine.has(norm(x)))).sort((a, b) => b.sp.length - a.sp.length)[0];
+        if (base) {
+          const cp = await runProc(["cp", "-al", join(root, base.d), site], { cwd: root, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, timeoutMs: 600_000 });
+          if (cp.code !== 0) { rmSync(site, { recursive: true, force: true }); mkdirSync(site, { recursive: true }); }
+          else rmSync(join(site, ".mlh-specs.json"), { force: true });
+        } else mkdirSync(site, { recursive: true });
+        const have = new Set(base && existsSync(site) ? base.sp.map(norm) : []);
+        const todo = specs.filter((x) => !have.has(norm(x)));
         const cache = join(root, "pip-cache");
         mkdirSync(cache, { recursive: true });
         const sb = Sandbox.attach(cache, { isolation: o.isolation, limits: { ...DEFAULT_LIMITS, cpuSec: 1800, memMB: 8192, fileMB: 4096, timeoutMs: 1_200_000 }, stats: o.stats, site, network: true });
         const pip = ["python3", "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-input", "--target", "/opt", "--cache-dir", "/mnt"];
         // torch-family packages always come from the CPU index (never CUDA builds); everything else from PyPI.
-        const torch = specs.filter((s) => TORCH.test(s)), rest = specs.filter((s) => !TORCH.test(s));
+        const torch = todo.filter((s) => TORCH.test(s)), rest = todo.filter((s) => !TORCH.test(s));
         let log = "";
         for (const [group, extra] of [[torch, ["--index-url", PYTORCH_CPU, "--extra-index-url", "https://pypi.org/simple"]], [rest, []]] as const) {
           if (!group.length) continue;
@@ -63,12 +75,6 @@ export function siteManager(root: string, o: { isolation: Isolation; stats: Sand
           if (r.category) { rmSync(site, { recursive: true, force: true }); return { message: `install failed (${r.category}) for ${group.join(" ")}:\n${log.slice(-2500)}`, specs: [] }; }
         }
         writeFileSync(done, JSON.stringify(specs));
-        // Sites differ by a package or two but each carries its own copy of torch (~1 GB): identical files are
-        // hard-linked to the most similar existing site. Without this, 29 sites filled 24 GB.
-        const peers = readdirSync(root).filter((d) => d !== key && existsSync(join(root, d, ".mlh-specs.json")));
-        const overlap = (d: string) => { const o = new Set(specsOf(join(root, d)).map(norm)); return specs.filter((x) => o.has(norm(x))).length; };
-        const best = peers.sort((a, b) => overlap(b) - overlap(a))[0];
-        if (best && overlap(best) > 0) await runProc(["hardlink", "-c", "-q", site, join(root, best)], { cwd: root, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, timeoutMs: 600_000 });
         return { site, message: `installed: ${specs.join(" ")}${log ? `\n${log.slice(-1500)}` : ""}`, specs };
       } finally {
         rmSync(lock, { recursive: true, force: true });
