@@ -32,6 +32,22 @@ describe("GPU plans", () => {
     expect(v({ ...base, stages: [{ ...base.stages[0], argv: ["python", "-c", "import urllib"] }, base.stages[1]] }).errors.join()).toMatch(/inline programs/);
   });
 
+  it("requires every /cache path to come from a declared fetch item, and records unknown data hosts", () => {
+    const evalStage = { id: "eval", argv: ["python", "main.py", "--eval", "--coco_path", "/cache/coco"], gpu: "T4", timeoutS: 1800, persist: [] };
+    expect(v({ ...base, stages: [evalStage] }).errors.join()).toMatch(/\/cache\/coco is not produced by any fetch item/);
+    const ok = v({ ...base, stages: [{ ...evalStage, argv: ["python", "main.py", "--coco_path", "/cache/data/coco"] }], fetch: [{ url: "https://images.cocodataset.org/zips/val2017.zip", to: "/cache/data/coco", unpack: "zip" }, { url: "https://example.org/w.pth", to: "/cache/data/w.pth" }], checks: [{ path: "/cache/data/coco/val2017", minFiles: 5000 }] });
+    expect(ok.errors).toEqual([]);
+    expect(ok.plan!.unknownHosts).toEqual(["example.org"]);
+    expect(v({ ...base, fetch: [{ url: "http://x.org/a", to: "/cache/data/a" }] }).errors.join()).toMatch(/must be https/);
+    expect(v({ ...base, fetch: [{ url: "https://x.org/a", to: "/tmp/a" }] }).errors.join()).toMatch(/under \/cache\/data/);
+  });
+
+  it("assigns the cheapest GPU with enough memory when a stage states its need", () => {
+    const r = v({ ...base, stages: [base.stages[0], { ...base.stages[1], gpu: "A100-40GB", gpuMemGB: 12 }] });
+    expect(r.plan!.stages[1]!.gpu).toBe("T4");
+    expect(v({ ...base, stages: [base.stages[0], { ...base.stages[1], gpu: "T4", gpuMemGB: 30 }] }).plan!.stages[1]!.gpu).toBe("A100-40GB");
+  });
+
   it("refuses a run whose worst case exceeds what is left of the budget", () => {
     const b = new Budget(1);
     b.charge(0.9);

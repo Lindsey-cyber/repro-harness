@@ -13,7 +13,9 @@ export type Action =
   | "model_query" // send repository content to an external model provider
   | "install_packages" // network to package indexes only, inside an install-only sandbox
   | "apply_patch" // a code change proposed by an agent becomes the source later runs use
-  | "apply_eval_patch"; // the same, for a change that touches evaluation, metric, data-split or seeding code
+  | "apply_eval_patch" // the same, for a change that touches evaluation, metric, data-split or seeding code
+  | "fetch_data" // download datasets/checkpoints from known data hosts (by harness code, into the cache)
+  | "fetch_data_unknown_host"; // the same from a host not on the data-host list
 
 export type Risk = "low" | "medium" | "high";
 
@@ -31,6 +33,8 @@ export const RISK: Record<Action, Risk> = {
   apply_patch: "medium",
   // An agent editing how the result is measured is exactly what could fake a reproduction.
   apply_eval_patch: "high",
+  fetch_data: "medium",
+  fetch_data_unknown_host: "high",
 };
 
 export interface Evidence {

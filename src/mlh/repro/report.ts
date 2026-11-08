@@ -76,7 +76,10 @@ export function renderRepro(s: RunState, localModules: Set<string> = new Set()):
     ...(cs.length ? cs.map((c) => `- \`${c.category}\` [${c.tier === "intervention" ? "confirmed by intervention" : c.tier === "log" ? "observed in run log" : "reported by agent"}] (${c.source}): ${c.evidence.replace(/\n/g, " ").slice(0, 200)}`) : ["None found."]),
     ``, `## Changes`, ``,
     ...(patches.length ? patches.map((p) => `- \`${p.id}\`: ${p.status === "held" ? `**held for approval**: ${p.reason}` : p.accepted ? `accepted (${p.risk} risk; ${p.basis})${p.version !== undefined ? `, became source v${p.version}` : ""}` : `not applied${p.refused ? `: ${p.refused}` : ""}`}`) : ["None."]),
-    ``, `## Plan`, "```json", JSON.stringify(specsOf(s), null, 1), "```", ``,
+    ``, `## Data provenance`, ``,
+    ...((s.nodes.get("repro.fetch")?.output as { items?: { url: string; to: string; sha256: string; bytes: number; skipped?: boolean }[]; checks?: { path: string; files: number; minFiles: number; ok: boolean }[] } | undefined)?.items?.map((i) => `- ${i.url} → \`${i.to}\` (${(i.bytes / 1e6).toFixed(1)} MB, sha256 ${i.sha256.slice(0, 16)}…${i.skipped ? ", cached" : ""})`) ?? ["No data fetched by the harness."]),
+    ...((s.nodes.get("repro.fetch")?.output as { checks?: { path: string; files: number; minFiles: number; ok: boolean }[] } | undefined)?.checks?.map((c) => `- check \`${c.path}\`: ${c.files} files (≥ ${c.minFiles}) ${c.ok ? "✔" : "✘"}`) ?? []),
+    ``, `## Plan`, "```json", JSON.stringify(s.nodes.get(N.plan)?.output ?? specsOf(s), null, 1).slice(0, 8000), "```", ``,
   ].join("\n");
   return { json, markdown: md };
 }

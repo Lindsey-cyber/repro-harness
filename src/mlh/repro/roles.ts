@@ -74,6 +74,8 @@ export const GPU_PLAN_ROLE: Role = {
 
 Choose the fidelity that fits the budget, and say why: "full" (the paper's protocol), "scaled" (the paper's protocol at reduced epochs/data/model size; then claims about absolute numbers will likely not reproduce, so prefer claims about rankings/deltas), or "eval_only" (evaluate released checkpoints). The harness computes the worst case (each stage running to its timeout) and rejects plans above budget, so give realistic timeouts. GPU prices per hour: T4 $0.59, L4 $0.80, A10G $1.10, A100-40GB $2.10, A100-80GB $2.50, H100 $3.95.
 
+Data and released checkpoints are NOT fetched by stages: list them in "fetch" ([{url, to: "/cache/data/<name>", sha256?, unpack?: "zip"|"tar"}]); harness code downloads them once (idempotent, provenance recorded) before any stage, and stages read them from /cache/data/... . Files the environment engineer may already have put elsewhere in /cache do not count: every /cache path a stage uses must come from a fetch item. Add "checks" ([{path, minFiles}]) so the harness verifies completeness, e.g. the evaluation split has the number of images the paper evaluates on. For GPU stages give "gpuMemGB" (the memory the stage needs); the harness assigns the cheapest GPU with that much memory.
+
 Each claim names the stage whose output contains its number and a regex with exactly one capture group (the last match is used). Commands must run scripts of the repository (no python -c / sh -c programs); if a needed script does not exist, plan it anyway and say so — the debugger adds it as a reviewed change. You may run short CPU commands to check scripts and flags; use the GPU only for very short probes.`,
   report: {
     description: "Finish with the stage plan.",
@@ -85,8 +87,10 @@ Each claim names the stage whose output contains its number and a regex with exa
         stages: { type: "array", items: { type: "object", properties: {
           id: { type: "string" }, argv: { type: "array", items: { type: "string" } }, gpu: { type: "string" }, timeoutS: { type: "integer" },
           needs: { type: "array", items: { type: "string" } }, persist: { type: "array", items: { type: "string" } }, network: { type: "boolean" },
-          perSeed: { type: "boolean" }, env: { type: "object" }, cwd: { type: "string" },
+          perSeed: { type: "boolean" }, env: { type: "object" }, cwd: { type: "string" }, gpuMemGB: { type: "number" },
         }, required: ["id", "argv", "timeoutS"] } },
+        fetch: { type: "array", items: { type: "object", properties: { url: { type: "string" }, to: { type: "string" }, sha256: { type: "string" }, unpack: { type: "string", enum: ["zip", "tar"] } }, required: ["url", "to"] } },
+        checks: { type: "array", items: { type: "object", properties: { path: { type: "string" }, minFiles: { type: "integer" } }, required: ["path", "minFiles"] } },
         claims: { type: "array", items: { type: "object", properties: { claim: { type: "string" }, stage: { type: "string" }, parse: { type: "string" }, scale: { type: "number" } }, required: ["claim", "stage", "parse"] } },
         seeds: { type: "array", items: { type: "integer" } }, seedArg: { type: "string" }, seedEnv: { type: "string" },
       },

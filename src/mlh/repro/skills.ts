@@ -332,4 +332,34 @@ const stage: Skill = {
   },
 };
 
-export const REPRO_SKILLS: Skill[] = [paper, claims, env, plan, run, compare, debug, patch, stage];
+// Data acquisition by harness code: the declared fetch items, then the completeness checks.
+const fetchData: Skill = {
+  id: "repro.fetch", version: "1.0.0", purpose: "setup", intents: ["reproduce"], actions: [], after: [], needs: () => null,
+  summary: "Download the plan's declared datasets/checkpoints into the cache (idempotent, sha256 recorded) and check completeness (e.g. the evaluation split has all its files).",
+  output: any,
+  async run(ctx) {
+    const g = need(ctx).gpu;
+    if (!g) throw new SkillError("harness_bug", "fetch needs the remote backend");
+    const p = gpuPlanOf(ctx.state)!;
+    const evidence: Evidence[] = [{ kind: "deterministic", check: p.unknownHosts.length ? `unknown data hosts: ${p.unknownHosts.join(", ")}` : "all fetch URLs are https on known data hosts", ok: true }];
+    if (ctx.approved) evidence.push({ kind: "human", check: `approval:${ctx.node.id}`, ok: true });
+    if (need(ctx).approvePolicy === "all") evidence.push({ kind: "human", check: "standing approval policy: all", ok: true });
+    const d = authorize(p.unknownHosts.length ? "fetch_data_unknown_host" : "fetch_data", evidence);
+    if (!d.allow) return d.hold ? { output: { fetched: [] }, hold: `fetch from ${p.unknownHosts.join(", ")}: ${d.reason}` } : { output: { refused: d.reason } };
+    const dir = join(ctx.workDir(), "fetcher");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "fetch_data.py"), readFileSync(join(import.meta.dirname, "../backends/fetch_data.py")));
+    const timeoutS = 3 * 3600;
+    const r = await modalRun({ repo: dir, cmd: ["python3", "fetch_data.py", JSON.stringify({ items: p.fetch, checks: p.checks })], timeoutS, network: true }, g.budget);
+    if (r.category) throw new SkillError(r.category === "experiment_error" ? "experiment_error" : r.category, `fetch failed: ${r.stderr.slice(-1500)}`);
+    const out = JSON.parse(r.stdout.trim().split("\n").pop() ?? "{}") as { items: unknown[]; checks: { path: string; files: number; minFiles: number; ok: boolean }[] };
+    const manifest = join(dir, "data-manifest.json");
+    writeFileSync(manifest, JSON.stringify(out, null, 1));
+    ctx.save("data-manifest.json", manifest);
+    const bad = out.checks.filter((c) => !c.ok);
+    if (bad.length) throw new SkillError("experiment_error", `data incomplete: ${bad.map((c) => `${c.path} has ${c.files} files, expected at least ${c.minFiles}`).join("; ")}`);
+    return { output: { ...out, basis: d.basis } };
+  },
+};
+
+export const REPRO_SKILLS: Skill[] = [paper, claims, env, plan, run, compare, debug, patch, stage, fetchData];
