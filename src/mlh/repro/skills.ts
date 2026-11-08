@@ -15,7 +15,7 @@ import { parseDiff, riskOf } from "./patchrisk.ts";
 import { CLAIMS_PROMPT, DEBUG_ROLE, ENV_ROLE, PLAN_ROLE } from "./roles.ts";
 import type { SiteManager } from "./site.ts";
 import { Budget, gpuPrice, modalRun } from "../backends/modal.ts";
-import { GPUS, gpuPlanOf, validateGpuPlan, type Stage } from "./gpu.ts";
+import { DATA_DOMAINS, GPUS, gpuPlanOf, validateGpuPlan, type Stage } from "./gpu.ts";
 import { GPU_PLAN_ROLE } from "./roles.ts";
 
 export interface ReproCtx {
@@ -191,7 +191,8 @@ const plan: Skill = {
         const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state)), paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip })}`,
           // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
           role: { ...GPU_PLAN_ROLE, maxSteps: GPU_PLAN_ROLE.maxSteps + attempt * 10 }, ...(feedback ? { continueWith: feedback.trim() } : {}) });
-        const v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: gpuPrice });
+        const src0 = need(ctx).versionDir(0);
+        const v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: gpuPrice, exists: (p) => existsSync(join(src0, p)) });
         if (v.plan) return { output: { specs: [], errors: [], gpuPlan: v.plan } };
         feedback = `\n\nYour previous plan was rejected: ${v.errors.join("; ")}. Fix it.`;
       }
@@ -359,7 +360,7 @@ const stage: Skill = {
     });
     const persist = st.persist.map((path) => ({ from: path, to: `${area(st, seed)}/${path}` }));
     const cmd = st.cwd ? ["bash", "-c", 'cd "$1" && shift && exec "$@"', "bash", st.cwd, ...argv] : argv;
-    const r = await modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, env, pip: pipOf(ctx.state), restore, persist, ...(st.gpu ? { gpu: st.gpu } : {}) }, g.budget);
+    const r = await modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, pip: pipOf(ctx.state), restore, persist, ...(st.gpu ? { gpu: st.gpu } : {}) }, g.budget);
     const log = join(ctx.workDir(), `${ctx.node.id.replace(/[^\w.-]+/g, "_")}.log`);
     mkdirSync(ctx.workDir(), { recursive: true });
     writeFileSync(log, `$ ${cmd.join(" ")}\n--- stdout\n${r.stdout.slice(-30000)}\n--- stderr\n${r.stderr.slice(-20000)}`);

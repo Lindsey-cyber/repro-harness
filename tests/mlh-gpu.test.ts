@@ -26,7 +26,8 @@ describe("GPU plans", () => {
 
   it("rejects plans over budget, unknown GPUs, networked GPU stages, forward references and inline programs", () => {
     expect(v(base, 0.2).errors.join()).toMatch(/exceeds the budget/);
-    expect(v({ ...base, stages: [{ ...base.stages[0], gpu: "T4" }, base.stages[1]] }).errors.join()).toMatch(/network access may not use a GPU/);
+    expect(v({ ...base, stages: [{ ...base.stages[0], gpu: "T4" }, base.stages[1]] }).errors).toEqual([]); // networked GPU stages are domain-restricted
+    expect(validateGpuPlan(claims, base, { budgetUsd: 5, price: gpuPrice, exists: (p) => p === "main.py" }).errors.join()).toMatch(/scripts\/fetch.sh does not exist/);
     expect(v({ ...base, stages: [base.stages[1], base.stages[0]] }).errors.join()).toMatch(/not an earlier stage/);
     expect(v({ ...base, stages: [base.stages[0], { ...base.stages[1], gpu: "B200" }] }).errors.join()).toMatch(/gpu B200 not in/);
     expect(v({ ...base, stages: [{ ...base.stages[0], argv: ["python", "-c", "import urllib"] }, base.stages[1]] }).errors.join()).toMatch(/inline programs/);
@@ -56,6 +57,9 @@ describe("GPU plans", () => {
     const r = v({ ...base, stages: [base.stages[0], { ...base.stages[1], gpu: "A100-40GB", gpuMemGB: 12 }] });
     expect(r.plan!.stages[1]!.gpu).toBe("T4");
     expect(v({ ...base, stages: [base.stages[0], { ...base.stages[1], gpu: "T4", gpuMemGB: 30 }] }).plan!.stages[1]!.gpu).toBe("A100-40GB");
+    // A stated memory need without a GPU named still gets a GPU (the LoRA planner did this; its training would have run on CPU).
+    const { gpu: _g, ...noGpu } = base.stages[1]!;
+    expect(v({ ...base, stages: [base.stages[0], { ...noGpu, gpuMemGB: 8 }] }).plan!.stages[1]!.gpu).toBe("T4");
   });
 
   it("refuses a run whose worst case exceeds what is left of the budget", () => {

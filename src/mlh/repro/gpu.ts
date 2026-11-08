@@ -17,6 +17,14 @@ export const DATA_HOSTS = [
   "s3.amazonaws.com", "www.cs.toronto.edu", "people.eecs.berkeley.edu", "data.dgl.ai", "snap.stanford.edu", "ogb.stanford.edu",
   "nlp.stanford.edu", "dl.dropboxusercontent.com", "www.dropbox.com", "drive.google.com", "drive.usercontent.google.com",
 ];
+// What a stage with network may reach (Modal outbound domain allowlist; wildcards allowed): data and
+// weight hosts and their CDNs. Package indexes and everything else stay blocked.
+export const DATA_DOMAINS = [
+  "huggingface.co", "*.huggingface.co", "*.hf.co", "images.cocodataset.org", "dl.fbaipublicfiles.com", "download.pytorch.org",
+  "github.com", "*.githubusercontent.com", "zenodo.org", "storage.googleapis.com", "*.s3.amazonaws.com", "s3.amazonaws.com",
+  "www.cs.toronto.edu", "people.eecs.berkeley.edu", "data.dgl.ai", "snap.stanford.edu", "ogb.stanford.edu", "nlp.stanford.edu",
+  "*.dropboxusercontent.com", "www.dropbox.com", "drive.google.com", "drive.usercontent.google.com",
+];
 export interface FetchItem { url: string; to: string; sha256?: string; unpack?: "zip" | "tar" }
 export const MAX_STAGE_S = 6 * 3600;
 
@@ -51,7 +59,7 @@ export interface GpuPlan {
 
 const INLINE = (argv: string[]) => argv.some((a, i) => a === "-c" && i > 0 && /^(python3?|sh|bash)$/.test(argv[i - 1]!)) || (/^(sh|bash)$/.test(argv[0] ?? "") && argv.includes("-c"));
 
-export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number }): { plan?: GpuPlan; errors: string[] } {
+export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number; exists?: (path: string) => boolean }): { plan?: GpuPlan; errors: string[] } {
   const errors: string[] = [];
   const r = raw as Partial<GpuPlan> & { stages?: Partial<Stage>[]; claims?: { claim?: string; stage?: string; parse?: string; scale?: number }[] };
   if (!r || !Array.isArray(r.stages) || !r.stages.length) return { errors: ["plan has no stages"] };
@@ -68,13 +76,15 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     const unknown = needs.find((n) => !seen.has(n));
     if (unknown) { errors.push(`${id}: needs ${unknown}, which is not an earlier stage`); continue; }
     if (s.gpu !== undefined && !GPUS.includes(String(s.gpu))) { errors.push(`${id}: gpu ${s.gpu} not in ${GPUS.join(", ")}`); continue; }
-    if (s.network && s.gpu) { errors.push(`${id}: a stage with network access may not use a GPU (fetch first, then compute offline)`); continue; }
+    // The script a stage runs must exist: a planner may not invent code (the debugger adds code as a reviewed change).
+    const script = s.argv[1] === "-m" ? `${(s.argv[2] ?? "").split(".").join("/")}.py` : s.argv.find((a) => /\.(py|sh)$/.test(a));
+    if (o.exists && script && !o.exists(typeof s.cwd === "string" ? `${s.cwd}/${script}` : script) && !o.exists(script)) { errors.push(`${id}: ${script} does not exist in the repository; use an existing script (data can be downloaded at run time by a stage with "network": true, restricted to data hosts)`); continue; }
     const timeoutS = Math.min(Math.max(Number(s.timeoutS) || 1800, 60), MAX_STAGE_S);
     const persist = (Array.isArray(s.persist) ? s.persist : []).map(String).filter((p) => !p.startsWith("/") && !p.includes(".."));
     // The cheapest GPU with enough memory, when the planner states the need.
     const mem = Number(s.gpuMemGB);
     let gpu = s.gpu ? String(s.gpu) : undefined;
-    if (gpu && mem > 0) {
+    if (mem > 0) {
       const fit = GPUS.filter((g) => GPU_MEM[g]! >= mem).sort((a, b) => o.price(a) - o.price(b))[0];
       if (!fit) { errors.push(`${id}: no GPU has ${mem} GB`); continue; }
       gpu = fit;

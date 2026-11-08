@@ -18,6 +18,7 @@ export interface RemoteRun {
   repo: string; cmd: string[]; gpu?: string; timeoutS: number; network?: boolean;
   env?: Record<string, string>; setup?: string; outputs?: string[]; image?: string;
   pip?: string[]; // installed into the image (cached by Modal), not at run time
+  domains?: string[]; // with network: only these outbound domains (wildcards allowed)
   restore?: { from: string; to: string }[]; // /cache/... -> repo-relative, before the command
   persist?: { from: string; to: string }[]; // repo-relative -> /cache/..., after the command
 }
@@ -129,7 +130,7 @@ export async function modalRun(run: RemoteRun, budget: Budget): Promise<RemoteRe
 
 async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteResult> {
   // An image with new pip packages takes a few minutes to build the first time.
-  const r = await call({ op: "run", repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [] }, (run.timeoutS + 2400) * 1000);
+  const r = await call({ op: "run", repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [], domains: run.domains ?? [] }, (run.timeoutS + 2400) * 1000);
   if (!r.ok) {
     const e = String(r.error);
     return { exitCode: -1, stdout: "", stderr: e, elapsedS: 0, costUsd: 0, files: {}, category: /Timeout|timed out|deadline/i.test(e) ? "timeout" : /Auth|Token/i.test(e) ? "precondition" : "sandbox_transient" };

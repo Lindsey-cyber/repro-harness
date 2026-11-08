@@ -66,6 +66,8 @@ def op_run(req):
                   block_network=not req.get("network", False))
     if req.get("gpu"):
         kwargs["gpu"] = req["gpu"]
+    if req.get("network") and req.get("domains"):
+        kwargs["outbound_domain_allowlist"] = req["domains"]  # network restricted to data hosts
     t0 = time.time()
     sb = modal.Sandbox.create(**kwargs)
     try:
