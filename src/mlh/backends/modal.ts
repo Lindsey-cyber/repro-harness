@@ -31,15 +31,21 @@ export class Budget {
   }
   // Container start-up and upload add a few minutes on top of the run's own timeout.
   worstCase(r: RemoteRun): number { return r.gpu ? (gpuPrice(r.gpu) * (r.timeoutS + 300)) / 3600 : (0.05 * r.timeoutS) / 3600; }
+  // Concurrent runs: each admitted run reserves its worst case until it settles, so parallel stages
+  // cannot together overshoot the limit.
+  reserved = 0;
   admit(r: RemoteRun): string | null {
     const w = this.worstCase(r);
-    return this.spent + w > this.limitUsd ? `budget: worst case $${w.toFixed(2)} exceeds the remaining $${(this.limitUsd - this.spent).toFixed(2)}` : null;
+    if (this.spent + this.reserved + w > this.limitUsd) return `budget: worst case $${w.toFixed(2)} exceeds the remaining $${(this.limitUsd - this.spent - this.reserved).toFixed(2)} (incl. $${this.reserved.toFixed(2)} reserved by running jobs)`;
+    this.reserved += w;
+    return null;
   }
+  release(r: RemoteRun) { this.reserved = Math.max(0, this.reserved - this.worstCase(r)); }
   charge(usd: number) {
     this.spent += usd;
     if (this.file) writeFileSync(this.file, JSON.stringify({ spent: this.spent, limit: this.limitUsd }));
   }
-  remaining(): number { return this.limitUsd - this.spent; }
+  remaining(): number { return this.limitUsd - this.spent - this.reserved; }
 }
 
 async function call(req: Record<string, unknown>, timeoutMs: number): Promise<Record<string, unknown>> {
@@ -118,6 +124,10 @@ export async function modalCheck(): Promise<{ ok: boolean; error?: string }> {
 export async function modalRun(run: RemoteRun, budget: Budget): Promise<RemoteResult> {
   const refused = budget.admit(run);
   if (refused) return { exitCode: -1, stdout: "", stderr: refused, elapsedS: 0, costUsd: 0, files: {}, category: "policy_denied" };
+  try { return await modalRunAdmitted(run, budget); } finally { budget.release(run); }
+}
+
+async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteResult> {
   // An image with new pip packages takes a few minutes to build the first time.
   const r = await call({ op: "run", repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [] }, (run.timeoutS + 2400) * 1000);
   if (!r.ok) {
