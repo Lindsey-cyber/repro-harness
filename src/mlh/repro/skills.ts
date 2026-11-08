@@ -120,6 +120,37 @@ const claims: Skill = {
   },
 };
 
+// The harness's own check that the environment works: start the launch command the environment agent
+// reported and watch it for SMOKE_S seconds. Passing means it exited cleanly or was still running
+// (training had started), with no Python traceback. The agent's own "runnable" is not trusted.
+export const SMOKE_S = 100;
+export function smokeVerdict(exit: number | null, output: string): { ok: boolean; why: string } {
+  if (/Traceback \(most recent call last\)/.test(output)) return { ok: false, why: "the command raised a Python exception" };
+  if (exit === 0) return { ok: true, why: "the command exited cleanly" };
+  if (exit === 124) return { ok: true, why: `the command was still running after ${SMOKE_S} s with no error` };
+  return { ok: false, why: `the command exited with status ${exit}` };
+}
+
+async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string, string>; example_command?: string[] } | undefined, pip: string[], site: string | undefined): Promise<{ ok: boolean; why: string; command: string; tail: string }> {
+  const argv = Array.isArray(launch?.example_command) ? launch!.example_command.map(String) : [];
+  if (!argv.length) return { ok: false, why: "the environment agent gave no launch command", command: "", tail: "" };
+  const env = Object.fromEntries(Object.entries(launch?.env ?? {}).filter(([k, v]) => /^[A-Z_][A-Z0-9_]*$/.test(k) && typeof v === "string" && !/^(PATH|HOME|LD_|PYTHONHOME)/.test(k))) as Record<string, string>;
+  const cwd = typeof launch?.cwd === "string" && !launch.cwd.startsWith("/") && !launch.cwd.includes("..") ? launch.cwd : ".";
+  const script = ["bash", "-c", `cd "$1" && shift && timeout ${SMOKE_S} "$@"; echo MLH_SMOKE_EXIT=$?`, "bash", cwd, ...argv];
+  const g = need(ctx).gpu;
+  let out: string, err: string;
+  if (g) {
+    const r = await modalRun({ repo: need(ctx).versionDir(0), cmd: script, gpu: "T4", timeoutS: SMOKE_S + 600, pip, env, network: true }, g.budget);
+    out = r.stdout; err = r.stderr;
+  } else {
+    const sb = Sandbox.create(join(ctx.workDir(), ".."), `${ctx.node.id}-smoke`, need(ctx).versionDir(0), { isolation: ctx.isolation, limits: { cpuSec: SMOKE_S * 2, memMB: 8192, fileMB: 2048, timeoutMs: (SMOKE_S + 60) * 1000 }, stats: ctx.stats, ...(site ? { site } : {}) });
+    const r = await sb.run(script, env); sb.remove(); out = r.stdout; err = r.stderr;
+  }
+  const m = /MLH_SMOKE_EXIT=(\d+)/.exec(out);
+  const v = smokeVerdict(m ? Number(m[1]) : null, `${out}\n${err}`);
+  return { ...v, command: argv.join(" "), tail: `${out.slice(-1500)}\n${err.replace(/^MLH_EXIT=\d+$/m, "").slice(-1500)}` };
+}
+
 const env: Skill = {
   id: N.env, version: "1.0.0", purpose: "setup", intents: ["reproduce"], actions: ["exec_sandboxed", "model_query"], after: [], needs: () => null,
   summary: "The environment agent installs what the repository needs and finds how to launch it; it may not edit code.",
@@ -134,7 +165,14 @@ const env: Skill = {
       r = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: ENV_ROLE.maxSteps * round }, continueWith: `The experiment is not runnable yet. Continue from where you stopped: resolve the remaining problems (${JSON.stringify((r.report.problems as { category: string }[] | undefined)?.map((p) => p.category) ?? [])}), verify by starting the documented command, then report again.` });
     }
     if (!r.report) throw new SkillError("experiment_error", "environment agent ran out of steps without a report");
-    return { output: { ...r.report, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, steps: r.steps } };
+    // Harness-verified: the launch command must actually start. One repair round if it does not.
+    const claimed = r.report.runnable === true;
+    let sm = await smoke(ctx, r.report.launch as never, r.pip, r.site);
+    if (!sm.ok) {
+      const fix = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: r.steps + ENV_ROLE.maxSteps }, continueWith: `The harness started your launch command (${sm.command}) for ${SMOKE_S} s and it failed: ${sm.why}.\nOutput tail:\n${sm.tail}\nFix the environment (not the code) and report again with a launch command that starts.` });
+      if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site); }
+    }
+    return { output: { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, steps: r.steps } };
   },
 };
 

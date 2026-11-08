@@ -8,12 +8,20 @@ import { afterFail, afterOk, finalStatus, initialNodes, N, validatePlan } from "
 import { parseDiff, riskOf } from "../src/mlh/repro/patchrisk.ts";
 import { classifyLog } from "../src/mlh/repro/report.ts";
 import { checkSpecs } from "../src/mlh/repro/site.ts";
-import { numberInText, parseMetric, statusOf } from "../src/mlh/repro/skills.ts";
+import { numberInText, parseMetric, smokeVerdict, statusOf } from "../src/mlh/repro/skills.ts";
 
 const at = "t";
 const claim = { id: "cora", metric: "accuracy", value: 0.815 };
 
 describe("reproduction: deciding code", () => {
+  it("judges the environment by the harness's smoke test, not by the agent's word", () => {
+    expect(smokeVerdict(124, "epoch 0 step 10 loss 0.69")).toMatchObject({ ok: true });
+    expect(smokeVerdict(0, "done")).toMatchObject({ ok: true });
+    expect(smokeVerdict(1, "error")).toMatchObject({ ok: false });
+    expect(smokeVerdict(124, "Traceback (most recent call last):\n ImportError: x")).toMatchObject({ ok: false, why: "the command raised a Python exception" });
+    expect(smokeVerdict(null, "")).toMatchObject({ ok: false });
+  });
+
   it("validates the planner's output and enforces at least three seeds", () => {
     const v = validatePlan([claim, { id: "pub", metric: "accuracy", value: 0.79 }], { runs: [{ claim: "cora", argv: ["python3", "train.py"], parse: "accuracy= ([0-9.]+)", seeds: [7] }, { claim: "pub", argv: ["x"], parse: "no group" }] });
     expect(v.specs).toHaveLength(1);

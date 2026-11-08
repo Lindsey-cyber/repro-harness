@@ -72,6 +72,8 @@ export function renderRepro(s: RunState, localModules: Set<string> = new Set()):
     `# Reproduction report`, ``, `- objective: ${s.objective}`, `- source: ${s.source}`, ``,
     `## Claims`, ``, `| claim | paper | status | mean | runs | source version |`, `|---|---|---|---|---|---|`,
     ...claims.map((c) => { const f = fin[c.id]!; return `| ${c.id} (${c.dataset ?? ""} ${c.metric}) | ${c.value}${c.std ? ` ± ${c.std}` : ""} | **${f.status}** | ${fmt(f.mean)} | ${(f.values ?? []).map((v) => v.toFixed(4)).join(", ")} | v${f.version} |`; }),
+    ``, `## Environment check (by the harness)`, ``,
+    (() => { const e = s.nodes.get(N.env)?.output as { smoke?: { ok: boolean; why: string; command: string }; agentSaidRunnable?: boolean } | undefined; return e?.smoke ? `- smoke test of \`${e.smoke.command.slice(0, 160)}\`: **${e.smoke.ok ? "passed" : "failed"}** (${e.smoke.why}); the environment agent said runnable = ${e.agentSaidRunnable}` : "- not run"; })(),
     ``, `## Root causes`, ``,
     ...(cs.length ? cs.map((c) => `- \`${c.category}\` [${c.tier === "intervention" ? "confirmed by intervention" : c.tier === "log" ? "observed in run log" : "reported by agent"}] (${c.source}): ${c.evidence.replace(/\n/g, " ").slice(0, 200)}`) : ["None found."]),
     ``, `## Changes`, ``,
