@@ -53,8 +53,8 @@ describe("GPU plans", () => {
     b.charge(0.9);
     expect(b.admit({ repo: "/x", cmd: ["x"], gpu: "H100", timeoutS: 600 })).toMatch(/exceeds the remaining/);
     expect(b.admit({ repo: "/x", cmd: ["x"], timeoutS: 600 })).toBeNull(); // CPU is nearly free
-    // Parallel runs reserve their worst case: two 25-minute T4 jobs fit in $0.80 one at a time, not together.
-    const c = new Budget(0.8);
+    // Parallel runs reserve their worst case: two 25-minute T4 jobs ($0.295 worst case each) fit in $0.50 one at a time, not together.
+    const c = new Budget(0.5);
     const job = { repo: "/x", cmd: ["x"], gpu: "T4", timeoutS: 1500 };
     expect(c.admit(job)).toBeNull();
     expect(c.admit(job)).toMatch(/reserved by running jobs/);
