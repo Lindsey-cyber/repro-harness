@@ -49,7 +49,11 @@ const remoteFor = (ctx: SkillCtx, pip: string[], image?: string) => {
     return { code: r.exitCode, stdout: r.stdout, stderr: r.stderr, category: r.category, costUsd: r.costUsd };
   } } };
 };
-export const imageOf = (s: RunState): string => (s.nodes.get(N.env)?.output as { image?: string } | undefined)?.image ?? DEFAULT_IMAGE_KEY;
+export const imageOf = (s: RunState): string => {
+  let img = (s.nodes.get(N.env)?.output as { image?: string } | undefined)?.image ?? DEFAULT_IMAGE_KEY;
+  for (const id of s.order) if (id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded") { const p = s.nodes.get(id)!.output as { accepted: boolean; image?: string }; if (p.accepted && p.image) img = p.image; }
+  return img;
+};
 export const pipOf = (s: RunState): string[] => {
   let pip = (s.nodes.get(N.env)?.output as { pip?: string[] } | undefined)?.pip ?? [];
   for (const id of s.order) if (id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded") { const p = s.nodes.get(id)!.output as { accepted: boolean; pip?: string[] }; if (p.accepted && p.pip) pip = p.pip; }
@@ -142,6 +146,8 @@ async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string,
   let out: string, err: string;
   if (g) {
     const r = await modalRun({ repo: need(ctx).versionDir(0), cmd: script, gpu: "T4", timeoutS: SMOKE_S + 600, pip, env, network: true, image: IMAGES[image ?? DEFAULT_IMAGE_KEY]! }, g.budget);
+    // A transport/budget failure is not a verdict on the environment: retry the node instead. (A failed image build is a verdict.)
+    if (r.exitCode === -1 && r.category && r.category !== "experiment_error") throw new SkillError(r.category, `smoke test could not run: ${r.stderr.slice(0, 300)}`);
     out = r.stdout; err = r.stderr;
   } else {
     const sb = Sandbox.create(join(ctx.workDir(), ".."), `${ctx.node.id}-smoke`, need(ctx).versionDir(0), { isolation: ctx.isolation, limits: { cpuSec: SMOKE_S * 2, memMB: 8192, fileMB: 2048, timeoutMs: (SMOKE_S + 60) * 1000 }, stats: ctx.stats, ...(site ? { site } : {}) });
@@ -300,8 +306,8 @@ const debug: Skill = {
     const diff = changed.length ? await unifiedDiff(base, r.workspace, changed) : "";
     const argv = Array.isArray(r.report.run_argv) && r.report.run_argv.length ? (r.report.run_argv as unknown[]).map(String) : undefined;
     if (diff) { const f = join(ctx.workDir(), "patch.diff"); writeFileSync(f, diff); ctx.save("patch.diff", f); }
-    const pipChanged = need(ctx).gpu && JSON.stringify(r.pip) !== JSON.stringify(pipOf(ctx.state));
-    return { output: { claim, causes: r.report.causes ?? [], patch_intent: r.report.patch_intent ?? "", expected_effect: r.report.expected_effect ?? "", changed, diff: diff.slice(0, 30000), ...(argv ? { run_argv: argv } : {}), hasPatch: changed.length > 0 || !!argv || !!pipChanged, workspace: r.workspace, ...(r.site ? { site: r.site } : {}), ...(pipChanged ? { pip: r.pip } : {}), steps: r.steps } };
+    const pipChanged = need(ctx).gpu && (JSON.stringify(r.pip) !== JSON.stringify(pipOf(ctx.state)) || (r.image ?? DEFAULT_IMAGE_KEY) !== imageOf(ctx.state));
+    return { output: { claim, causes: r.report.causes ?? [], patch_intent: r.report.patch_intent ?? "", expected_effect: r.report.expected_effect ?? "", changed, diff: diff.slice(0, 30000), ...(argv ? { run_argv: argv } : {}), hasPatch: changed.length > 0 || !!argv || !!pipChanged, workspace: r.workspace, ...(r.site ? { site: r.site } : {}), ...(pipChanged ? { pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY } : {}), steps: r.steps } };
   },
 };
 
@@ -311,7 +317,7 @@ const patch: Skill = {
   output: any,
   async run(ctx) {
     const { claim, from, debug: dbg } = ctx.node.params as { claim: string; from: number; debug: string };
-    const d = outOf<{ diff: string; changed: string[]; run_argv?: string[]; workspace: string; site?: string; pip?: string[] }>(ctx.state, dbg);
+    const d = outOf<{ diff: string; changed: string[]; run_argv?: string[]; workspace: string; site?: string; pip?: string[]; image?: string }>(ctx.state, dbg);
     const gp = gpuPlanOf(ctx.state);
     const spec = gp ? { argv: gp.stages.find((x) => `stage-${x.id}` === claim)?.argv ?? [] } : specsOf(ctx.state).find((x) => x.claim === claim)!;
     const files = parseDiff(d.diff, need(ctx).versionDir(from), d.workspace);
@@ -331,7 +337,7 @@ const patch: Skill = {
       rmSync(dest, { recursive: true, force: true });
       buildVersion(need(ctx).versionDir(currentVersion(ctx.state).version), d.workspace, d.changed, dest);
     }
-    return { output: { accepted: true, risk, reasons, basis: decision.basis, ...(version !== undefined ? { version } : {}), ...(d.run_argv ? { argv: { [claim]: d.run_argv } } : {}), ...(d.site ? { site: d.site } : {}), ...(d.pip ? { pip: d.pip } : {}) } };
+    return { output: { accepted: true, risk, reasons, basis: decision.basis, ...(version !== undefined ? { version } : {}), ...(d.run_argv ? { argv: { [claim]: d.run_argv } } : {}), ...(d.site ? { site: d.site } : {}), ...(d.pip ? { pip: d.pip } : {}), ...(d.image ? { image: d.image } : {}) } };
   },
 };
 

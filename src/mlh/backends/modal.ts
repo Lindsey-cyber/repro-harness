@@ -2,7 +2,7 @@
 // never on this machine; this module uploads, launches and reads results through
 // the Modal SDK (modal_runner.py). A dollar budget is enforced before every
 // launch: a run whose worst case would exceed what is left is refused.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FailureCategory } from "../core/types.ts";
 import { runProc } from "../io/proc.ts";
@@ -28,7 +28,20 @@ export class Budget {
   spent = 0;
   // With a file, spending survives a crash: a resumed run continues from what it already spent.
   constructor(readonly limitUsd: number, private readonly file?: string) {
-    if (file && existsSync(file)) this.spent = Number(JSON.parse(readFileSync(file, "utf8")).spent) || 0;
+    if (file && existsSync(file)) {
+      try {
+        const j = JSON.parse(readFileSync(file, "utf8")) as { spent?: number; reserved?: number };
+        // Reservations left unsettled by a killed process count as spent: those containers did run.
+        this.spent = (Number(j.spent) || 0) + (Number(j.reserved) || 0);
+      } catch { /* a torn file: start from the backup below */ if (existsSync(`${file}.bak`)) this.spent = Number(JSON.parse(readFileSync(`${file}.bak`, "utf8")).spent) || 0; }
+    }
+  }
+  private save() {
+    if (!this.file) return;
+    const body = JSON.stringify({ spent: this.spent, reserved: this.reserved, limit: this.limitUsd });
+    writeFileSync(`${this.file}.tmp`, body);
+    renameSync(`${this.file}.tmp`, this.file); // atomic: a kill mid-write leaves the old or the new file
+    writeFileSync(`${this.file}.bak`, body);
   }
   // Container start-up and upload add a few minutes on top of the run's own timeout.
   worstCase(r: RemoteRun): number { return r.gpu ? (gpuPrice(r.gpu) * (r.timeoutS + 300)) / 3600 : (0.05 * r.timeoutS) / 3600; }
@@ -39,12 +52,13 @@ export class Budget {
     const w = this.worstCase(r);
     if (this.spent + this.reserved + w > this.limitUsd) return `budget: worst case $${w.toFixed(2)} exceeds the remaining $${(this.limitUsd - this.spent - this.reserved).toFixed(2)} (incl. $${this.reserved.toFixed(2)} reserved by running jobs)`;
     this.reserved += w;
+    this.save();
     return null;
   }
-  release(r: RemoteRun) { this.reserved = Math.max(0, this.reserved - this.worstCase(r)); }
+  release(r: RemoteRun) { this.reserved = Math.max(0, this.reserved - this.worstCase(r)); this.save(); }
   charge(usd: number) {
     this.spent += usd;
-    if (this.file) writeFileSync(this.file, JSON.stringify({ spent: this.spent, limit: this.limitUsd }));
+    this.save();
   }
   remaining(): number { return this.limitUsd - this.spent - this.reserved; }
 }
@@ -133,7 +147,11 @@ async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteR
   const r = await call({ op: "run", repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [], domains: run.domains ?? [] }, (run.timeoutS + 2400) * 1000);
   if (!r.ok) {
     const e = String(r.error);
-    return { exitCode: -1, stdout: "", stderr: e, elapsedS: 0, costUsd: 0, files: {}, category: /Timeout|timed out|deadline/i.test(e) ? "timeout" : /Auth|Token/i.test(e) ? "precondition" : "sandbox_transient" };
+    const head = e.split("\n")[0]!; // classify the exception, not a build log that mentions "tokenizers"
+    // What ran before the failure is charged.
+    const ranS = Number(r.elapsed_s) || 0;
+    if (run.gpu && ranS) budget.charge((gpuPrice(run.gpu) * ranS) / 3600);
+    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: run.gpu ? (gpuPrice(run.gpu) * ranS) / 3600 : 0, files: {}, category: /ImageBuildError|Image build/.test(head) ? "experiment_error" : /\b(AuthError|Token (ID|secret)|Unauthenticated)\b/.test(head) ? "precondition" : /^(\w+\.)*(Timeout|SandboxTimeout|ExecTimeout)\w*Error|timed out|deadline exceeded/i.test(head) ? "timeout" : "sandbox_transient" };
   }
   const elapsed = Number(r.elapsed_s), cost = run.gpu ? (gpuPrice(run.gpu) * elapsed) / 3600 : 0;
   budget.charge(cost);

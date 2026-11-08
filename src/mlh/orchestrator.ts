@@ -2,7 +2,7 @@
 // parallel, authorizes each node's actions before it runs, retries what a
 // fresh attempt can fix, replans on results, and writes the report. Every
 // state change is journaled first, so a killed process resumes where it was.
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { authorize, type Action, type Evidence } from "./core/authz.ts";
 import { apply, blocked, depOf, ready, replay, settled, type RunEvent, type RunState, type TaskNode } from "./core/dag.ts";
@@ -111,6 +111,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   } else if (!existsSync(srcDir)) throw new Error(`cannot resume ${runDir}: source copy missing`);
   events = [];
 
+  rmSync(join(runDir, "stopped.json"), { force: true }); // a (re)started run is no longer stopped
   const st = o.isolation ? { isolation: o.isolation, checks: [{ name: "forced by caller", ok: o.isolation === "namespace" }] } : await selfTest(join(runDir, "sbx"));
   const isolationEvidence: Evidence = { kind: "deterministic", check: `sandbox.selftest(${st.checks.map((c) => `${c.name}=${c.ok}`).join(",")})`, ok: st.isolation === "namespace" };
   const trust = loadTrust(o.trustFile);
@@ -126,7 +127,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     sites: siteManager(resolve(o.sitesDir ?? ".mlh/sites"), { isolation: st.isolation, stats }),
     versionDir: (v: number) => (v === 0 ? srcDir : join(runDir, "versions", `v${v}`)),
     // Spending is saved next to the journal, so a resumed run continues from what it already spent.
-    ...(gpuBudget ? { gpu: { budget: new Budget(gpuBudget, join(runDir, "budget.json")), runKey: createHash("sha256").update(runDir).digest("hex").slice(0, 12) } } : {}),
+    ...(gpuBudget ? { gpu: { budget: new Budget(gpuBudget, join(runDir, "budget.json")), runKey: createHash("sha256").update(readFileSync(join(runDir, "run.json"), "utf8")).digest("hex").slice(0, 12) } } : {}),
   } : undefined;
   const specs = mode === "repro" ? SKILLS.filter((s) => s.id.startsWith("repro."))
     : SKILLS.filter((s) => !s.id.startsWith("repro.") && (o.llm || !s.actions.includes("model_query")) && (mode === "agentic" || (s.id !== AGENT && !s.id.startsWith("verify."))) && (mode !== "agentic" || !s.id.startsWith("llm.")));
@@ -238,7 +239,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     } catch (e) {
       // A model call that failed or returned garbage is a transient fault of the provider, not a harness bug.
       const msg = String(e);
-      const cat = e instanceof SkillError ? e.category : /LLM 40[123]|Insufficient Balance|invalid api key/i.test(msg) ? "provider_fatal" : /LLM|model returned/.test(msg) ? "provider_transient" : "harness_bug";
+      const cat = e instanceof SkillError ? e.category : /LLM 40[12]\b|Insufficient Balance|invalid api key|Authentication Fails/i.test(msg) ? "provider_fatal" : /LLM|model returned/.test(msg) ? "provider_transient" : "harness_bug";
       if (cat === "provider_fatal") fatal = msg.slice(0, 300);
       emit({ t: "fail", at: now(), id: n.id, category: cat, message: String((e as Error).message ?? e).slice(0, 2000) });
       outcome = "fail"; category = cat;

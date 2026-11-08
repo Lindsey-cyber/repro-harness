@@ -3,7 +3,7 @@
 // that stopped making progress and resume it from its journal. A fatal provider
 // error (no balance, bad key) stops the whole campaign. After every paper the
 // summary table is rewritten, so the state is always readable in one file.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runProc, startProc } from "../io/proc.ts";
 
@@ -13,12 +13,20 @@ const ROOT = resolve(import.meta.dirname, "../../..");
 
 async function prepare(p: Paper): Promise<string> {
   const dir = join(ROOT, ".mlh", "complex-src", p.id);
-  if (existsSync(join(dir, ".git"))) return dir;
   const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/tmp", ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}), GIT_TERMINAL_PROMPT: "0" };
-  let r = await runProc(["git", "clone", "--quiet", p.repo, dir], { cwd: ROOT, env, timeoutMs: 600_000 });
+  // A cached clone counts only if it is at the pinned commit.
+  if (existsSync(join(dir, ".git"))) {
+    const head = await runProc(["git", "rev-parse", "HEAD"], { cwd: dir, env, timeoutMs: 30_000 });
+    if (head.stdout.trim().startsWith(p.commit)) return dir;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const tmp = `${dir}.tmp`;
+  rmSync(tmp, { recursive: true, force: true });
+  let r = await runProc(["git", "clone", "--quiet", p.repo, tmp], { cwd: ROOT, env, timeoutMs: 600_000 });
   if (r.code !== 0) throw new Error(`clone ${p.repo}: ${r.stderr.slice(-300)}`);
-  r = await runProc(["git", "checkout", "--quiet", p.commit], { cwd: dir, env, timeoutMs: 120_000 });
+  r = await runProc(["git", "checkout", "--quiet", p.commit], { cwd: tmp, env, timeoutMs: 120_000 });
   if (r.code !== 0) throw new Error(`checkout ${p.commit}: ${r.stderr.slice(-300)}`);
+  renameSync(tmp, dir);
   return dir;
 }
 
@@ -30,22 +38,39 @@ export function allowedSilenceMs(runDir: string): number {
   const ev = events(runDir);
   const started = new Set(ev.filter((e) => e.t === "start").map((e) => e.id));
   for (const e of ev) if (e.t === "ok" || e.t === "fail") started.delete(e.id);
-  let max = 30 * 60_000;
+  // Agent nodes write no journal events while they work (their checkpoints count as progress, see
+  // lastProgressMs); a single remote command may take an hour plus an image build.
+  let max = 2 * 3600_000;
   const plan = ev.find((e) => e.t === "ok" && e.id === "repro.plan") as { output?: { gpuPlan?: { stages: { id: string; timeoutS: number }[] } } } | undefined;
   for (const id of started) {
     const st = plan?.output?.gpuPlan?.stages.find((s) => id?.startsWith(`repro.stage:${s.id}:`));
-    if (st) max = Math.max(max, (st.timeoutS + 900) * 1000);
+    if (st) max = Math.max(max, (st.timeoutS + 2400 + 600) * 1000); // modalRun itself waits timeout + 2400 s
     if (id === "repro.fetch") max = Math.max(max, 3.5 * 3600_000);
   }
   return max;
+}
+
+// Progress: the newest write to the journal or to any agent checkpoint/transcript under work/.
+export function lastProgressMs(runDir: string): number {
+  let t = existsSync(join(runDir, "journal.jsonl")) ? statSync(join(runDir, "journal.jsonl")).mtimeMs : 0;
+  const walk = (d: string, depth: number) => {
+    if (depth > 4 || !existsSync(d)) return;
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory() && e.name !== "ws") walk(p, depth + 1);
+      else if (e.name === "state.json" || e.name === "transcript.jsonl") t = Math.max(t, statSync(p).mtimeMs);
+    }
+  };
+  walk(join(runDir, "work"), 0);
+  return t;
 }
 
 function runChild(args: string[], runDir: string, log: string): Promise<{ code: number | null; killedForStall: boolean }> {
   const child = startProc(["npx", "tsx", join(ROOT, "src/mlh/cli.ts"), ...args], { cwd: ROOT, env: process.env, onOutput: (d) => appendFileSync(log, d) });
   let killed = false;
   const timer = setInterval(() => {
-    const j = join(runDir, "journal.jsonl");
-    const age = existsSync(j) ? Date.now() - statSync(j).mtimeMs : 0;
+    const last = lastProgressMs(runDir);
+    const age = last ? Date.now() - last : 0;
     if (age > allowedSilenceMs(runDir)) {
       killed = true;
       appendFileSync(log, `\n[watchdog] no progress for ${Math.round(age / 60000)} min: killing for resume\n`);
@@ -114,7 +139,12 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
         appendFileSync(log, `\n[campaign] ${String(e)}\n`);
       }
       const row = summarize(p, runDir, resumes, (Date.now() - t0) / 1000);
-      if (row.stopped === "provider_fatal") stop = true; // no point starting the next paper
+      if (row.stopped === "provider_fatal") {
+        // No final row: after the balance is restored, a relaunch resumes this paper from its journal.
+        stop = true;
+        writeFileSync(join(o.out, `${o.label}.md`), render([...rows, row]));
+        continue;
+      }
       rows.push(row);
       appendFileSync(rowsFile, JSON.stringify(row) + "\n");
       writeFileSync(join(o.out, `${o.label}.md`), render(rows));

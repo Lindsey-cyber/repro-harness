@@ -82,12 +82,12 @@ def op_run(req):
     try:
         sb.filesystem.write_bytes(tar_dir(req["repo"]), "/tmp/repo.tgz")
         sb.exec("bash", "-c", "mkdir -p /work && tar -xzf /tmp/repo.tgz -C /work", timeout=600).wait()
-        pre = " && ".join(
-            f"mkdir -p {shlex.quote(os.path.dirname('/work/' + r['to']) or '/work')} && cp -a {shlex.quote(r['from'])} {shlex.quote('/work/' + r['to'])}"
-            for r in (req.get("restore") or [])) or "true"
-        post = " ; ".join(
-            f"mkdir -p {shlex.quote(os.path.dirname(p['to']))} && cp -a {shlex.quote('/work/' + p['from'])} {shlex.quote(p['to'])}"
-            for p in (req.get("persist") or [])) or "true"
+        # Copy SRC to exactly DST, replacing it (cp -a SRC DST would nest SRC inside an existing DST).
+        def put(src, dst):
+            q, d = shlex.quote(src), shlex.quote(dst)
+            return f"rm -rf {d} && mkdir -p $(dirname {d}) && cp -a {q} {d}"
+        pre = " && ".join(put(r["from"], "/work/" + r["to"]) for r in (req.get("restore") or [])) or "true"
+        post = " ; ".join(put("/work/" + p["from"], p["to"]) for p in (req.get("persist") or [])) or "true"
         env = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in (req.get("env") or {}).items())
         cmd = " ".join(shlex.quote(a) for a in req["cmd"])
         script = f"cd /work && ({pre}) && {('env ' + env + ' ') if env else ''}{cmd}; s=$?; ({post}) >/dev/null 2>&1; sync; exit $s"
@@ -106,9 +106,10 @@ def op_run(req):
 
 
 if __name__ == "__main__":
+    T0 = time.time()
     req = json.loads(sys.stdin.read())
     try:
         res = {"check": op_check, "run": op_run}[req["op"]](req)
         print(json.dumps({"ok": True, **res}))
-    except Exception as e:  # reported to the harness, which classifies it
-        print(json.dumps({"ok": False, "error": f"{type(e).__name__}: {str(e)[:2000]}"}))
+    except Exception as e:  # reported to the harness, which classifies it (and charges what ran)
+        print(json.dumps({"ok": False, "error": f"{type(e).__name__}: {str(e)[:2000]}", "elapsed_s": time.time() - T0}))

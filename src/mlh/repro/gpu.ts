@@ -67,7 +67,9 @@ export interface GpuPlan {
   worstCaseUsd: number;
 }
 
-const INLINE = (argv: string[]) => argv.some((a, i) => a === "-c" && i > 0 && /^(python3?|sh|bash)$/.test(argv[i - 1]!)) || (/^(sh|bash)$/.test(argv[0] ?? "") && argv.includes("-c"));
+// An interpreter given a program on the command line (python -u -c, bash -lc, python3.11 -c, ...).
+const INTERP = /^(.*\/)?(python[\d.]*|sh|bash|zsh|dash)$/;
+const INLINE = (argv: string[]) => INTERP.test(argv[0] ?? "") && argv.slice(1).some((a) => /^-[a-zA-Z]*c$/.test(a));
 
 export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number; exists?: (path: string) => boolean }): { plan?: GpuPlan; errors: string[] } {
   const errors: string[] = [];
@@ -85,10 +87,17 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     const needs = (Array.isArray(s.needs) ? s.needs : []).map(String);
     const unknown = needs.find((n) => !seen.has(n));
     if (unknown) { errors.push(`${id}: needs ${unknown}, which is not an earlier stage`); continue; }
+    const seeded = needs.find((n) => stages.find((x) => x.id === n)?.perSeed);
+    if (seeded && !s.perSeed) { errors.push(`${id}: needs per-seed stage ${seeded} but is not per-seed itself (make it perSeed so each seed's outputs reach it)`); continue; }
     if (s.gpu !== undefined && !GPUS.includes(String(s.gpu))) { errors.push(`${id}: gpu ${s.gpu} not in ${GPUS.join(", ")}`); continue; }
     // The script a stage runs must exist: a planner may not invent code (the debugger adds code as a reviewed change).
-    const script = s.argv[1] === "-m" ? `${(s.argv[2] ?? "").split(".").join("/")}.py` : s.argv.find((a) => /\.(py|sh)$/.test(a));
-    if (o.exists && script && !o.exists(typeof s.cwd === "string" ? `${s.cwd}/${script}` : script) && !o.exists(script)) { errors.push(`${id}: ${script} does not exist in the repository; use an existing script (data can be downloaded at run time by a stage with "network": true, restricted to data hosts)`); continue; }
+    // -m: a local module (mod.py, mod/__init__.py, mod/__main__.py) must exist; an installed module (torch.distributed.run) is not checked.
+    const mi = s.argv.indexOf("-m");
+    const modPath = mi > 0 ? (s.argv[mi + 1] ?? "").split(".").join("/") : "";
+    const top = modPath.split("/")[0] ?? "";
+    const inRepo = (p: string) => !!o.exists && (o.exists(typeof s.cwd === "string" ? `${s.cwd}/${p}` : p) || o.exists(p));
+    const script = mi > 0 ? (inRepo(`${top}.py`) || inRepo(top) ? [`${modPath}.py`, `${modPath}/__init__.py`, `${modPath}/__main__.py`].find(inRepo) ?? `${modPath}.py` : undefined) : s.argv.find((a) => /\.(py|sh)$/.test(a));
+    if (o.exists && script && !inRepo(script)) { errors.push(`${id}: ${script} does not exist in the repository; use an existing script (data can be downloaded at run time by a stage with "network": true, restricted to data hosts)`); continue; }
     const timeoutS = Math.min(Math.max(Number(s.timeoutS) || 1800, 60), MAX_STAGE_S);
     const persist = (Array.isArray(s.persist) ? s.persist : []).map(String).filter((p) => !p.startsWith("/") && !p.includes(".."));
     // The cheapest GPU with enough memory, when the planner states the need.
@@ -119,7 +128,8 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   for (const st of stages) {
     for (const ref of [...st.argv, ...Object.values(st.env ?? {})].flatMap((a) => a.match(/\/cache\/[\w./-]+/g) ?? [])) {
       if (ref.startsWith("/cache/runs/")) continue;
-      if (!fetch.some((f) => ref.startsWith(f.to) || f.to.startsWith(ref))) errors.push(`${st.id}: ${ref} is not produced by any fetch item; declare where it comes from (fetch: [{url, to: "/cache/data/..."}])`);
+      const under = (a: string, b: string) => a === b || a.startsWith(b.endsWith("/") ? b : `${b}/`);
+      if (!fetch.some((f) => under(ref.replace(/\/$/, ""), f.to.replace(/\/$/, "")))) errors.push(`${st.id}: ${ref} is not produced by any fetch item; declare where it comes from (fetch: [{url, to: "/cache/data/..."}])`);
     }
   }
   const unknownHosts = [...new Set(fetch.map((f) => new URL(f.url).hostname).filter((h) => !DATA_HOSTS.some((d) => h === d || h.endsWith(`.${d}`))))];
@@ -141,7 +151,7 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     if (groups !== 1) { errors.push(`${c.id}: parse must be a regex with exactly one capture group`); continue; }
     cl.push({ claim: c.id, stage: String(m.stage).replace(/[^\w-]/g, "_"), parse: String(m.parse), ...(typeof m.scale === "number" && m.scale > 0 ? { scale: m.scale } : {}) });
   }
-  const seeds = (Array.isArray(r.seeds) ? r.seeds : [0]).filter((x) => Number.isInteger(x)).slice(0, 5);
+  const seeds = [...new Set((Array.isArray(r.seeds) ? r.seeds : [0]).filter((x) => Number.isInteger(x)))].slice(0, 5);
   if (!seeds.length) seeds.push(0);
   // Worst case: every stage instance runs to its timeout, plus container start-up.
   const worstCaseUsd = stages.reduce((a, s) => a + (s.gpu ? (o.price(s.gpu) * (s.timeoutS + 300)) / 3600 : (0.1 * (s.timeoutS + 300)) / 3600) * (s.perSeed ? seeds.length : 1), 0);

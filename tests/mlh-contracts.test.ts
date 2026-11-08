@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { agentLoop, type Role } from "../src/mlh/agentloop.ts";
 import { zeroUsage, type ChatMsg } from "../src/mlh/io/llm.ts";
-import { allowedSilenceMs, summarize } from "../src/mlh/repro/campaign.ts";
+import { allowedSilenceMs, lastProgressMs, summarize } from "../src/mlh/repro/campaign.ts";
 import type { ChatModel } from "../src/mlh/skills/index.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "mlh-contract-"));
@@ -75,14 +75,24 @@ describe("campaign summary", () => {
 });
 
 describe("campaign watchdog", () => {
-  it("allows 30 min of silence normally, and a running stage's timeout plus 15 min while a long stage runs", () => {
+  it("allows 2 h of silence normally (agents write no journal events), and a running stage's full modal wait while it runs", () => {
     const d = tmp();
     const plan = { t: "ok", at: "t", id: "repro.plan", output: { gpuPlan: { stages: [{ id: "train", timeoutS: 5400 }] } } };
     writeFileSync(join(d, "journal.jsonl"), [plan, { t: "start", at: "t", id: "repro.env" }, { t: "ok", at: "t", id: "repro.env" }].map((x) => JSON.stringify(x)).join("\n"));
-    expect(allowedSilenceMs(d)).toBe(30 * 60_000);
+    expect(allowedSilenceMs(d)).toBe(2 * 3600_000);
     writeFileSync(join(d, "journal.jsonl"), [plan, { t: "start", at: "t", id: "repro.stage:train:v0" }].map((x) => JSON.stringify(x)).join("\n"));
-    expect(allowedSilenceMs(d)).toBe((5400 + 900) * 1000);
+    expect(allowedSilenceMs(d)).toBe((5400 + 3000) * 1000);
     writeFileSync(join(d, "journal.jsonl"), [plan, { t: "start", at: "t", id: "repro.stage:train:v0" }, { t: "ok", at: "t", id: "repro.stage:train:v0" }].map((x) => JSON.stringify(x)).join("\n"));
-    expect(allowedSilenceMs(d)).toBe(30 * 60_000);
+    expect(allowedSilenceMs(d)).toBe(2 * 3600_000);
+  });
+
+  it("counts an agent's checkpoint writes as progress, not only the journal", async () => {
+    const d = tmp();
+    writeFileSync(join(d, "journal.jsonl"), "{}\n");
+    const j = lastProgressMs(d);
+    await new Promise((r) => setTimeout(r, 20));
+    mkdirSync(join(d, "work", "repro.env"), { recursive: true });
+    writeFileSync(join(d, "work", "repro.env", "transcript.jsonl"), "{}\n");
+    expect(lastProgressMs(d)).toBeGreaterThan(j);
   });
 });
