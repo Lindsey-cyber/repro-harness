@@ -62,6 +62,11 @@ async function main(): Promise<void> {
       console.log(`approved ${id}; run \`npm run mlh -- resume ${runDir}\``);
       break;
     }
+    case "campaign-status": {
+      const { campaignStatus } = await import("./repro/campaign.ts");
+      console.log(campaignStatus(positional[0] ?? "c1"));
+      break;
+    }
     case "solo": {
       // Single-agent baseline on one paper (remote GPUs, same budget, verified by rerun).
       const { runSolo } = await import("./repro/solo.ts");

@@ -154,3 +154,21 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
   }));
   writeFileSync(join(o.out, `${o.label}.md`), render(rows));
 }
+
+// One line per paper: finished node kinds, nodes running now, failures, GPU spent, minutes since progress.
+export function campaignStatus(label: string): string {
+  const base = join(ROOT, ".mlh", "campaign", label);
+  if (!existsSync(base)) return `no campaign ${label}`;
+  const lines: string[] = [];
+  for (const d of readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.includes(".")).map((e) => e.name).sort()) {
+    const runDir = join(base, d);
+    const ev = events(runDir);
+    const done = [...new Set(ev.filter((e) => e.t === "ok").map((e) => (e.id ?? "").replace(/^repro\./, "").replace(/:.*$/, "")))];
+    const open = new Set(ev.filter((e) => e.t === "start").map((e) => e.id));
+    for (const e of ev) if (e.t === "ok" || e.t === "fail" || e.t === "hold") open.delete(e.id);
+    const spent = existsSync(join(runDir, "budget.json")) ? (JSON.parse(readFileSync(join(runDir, "budget.json"), "utf8")) as { spent: number }).spent : 0;
+    const idle = Math.round((Date.now() - lastProgressMs(runDir)) / 60000);
+    lines.push(`${d.padEnd(15)} ok[${done.join(",")}] running[${[...open].map((x) => (x ?? "").replace(/^repro\./, "")).join(",")}] fails=${ev.filter((e) => e.t === "fail").length} gpu=$${spent.toFixed(2)} idle=${idle}m${ev.some((e) => e.t === "done") ? " DONE" : ""}`);
+  }
+  return lines.join("\n");
+}
