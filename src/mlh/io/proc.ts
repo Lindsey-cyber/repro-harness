@@ -31,3 +31,14 @@ export function runProc(cmd: string[], opts: { cwd: string; env: Record<string, 
     child.on("close", (code, signal) => done(code, signal));
   });
 }
+
+// A long-running child the caller can watch and kill (its whole process group).
+export function startProc(cmd: string[], opts: { cwd: string; env: NodeJS.ProcessEnv; onOutput: (d: Buffer) => void }): { kill: () => void; done: Promise<number | null> } {
+  const child = spawn(cmd[0]!, cmd.slice(1), { cwd: opts.cwd, env: opts.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  child.stdout.on("data", opts.onOutput);
+  child.stderr.on("data", opts.onOutput);
+  return {
+    kill: () => { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already gone */ } },
+    done: new Promise((res) => child.on("close", (code) => res(code))),
+  };
+}

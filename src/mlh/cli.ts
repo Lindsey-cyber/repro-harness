@@ -62,6 +62,12 @@ async function main(): Promise<void> {
       console.log(`approved ${id}; run \`npm run mlh -- resume ${runDir}\``);
       break;
     }
+    case "campaign": {
+      // Reproduce a queue of papers unattended: mlh campaign bench/complex/campaign.json --label c1 [--parallel 2]
+      const { runCampaign } = await import("./repro/campaign.ts");
+      await runCampaign({ config: positional[0]!, label: flag("label") ?? "campaign", parallel: Number(flag("parallel") ?? 2), out: flag("out") ?? "bench/complex/results" });
+      break;
+    }
     case "repro-bench": {
       const { runReproBench } = await import("./repro/bench.ts");
       await runReproBench({ modes: (flag("modes") ?? "script,solo,team").split(",") as never, out: flag("out") ?? "bench/repro/results", approve: (flag("approve") as never) ?? "all", providerFaults: Number(flag("provider-faults") ?? 0), ...(flag("crash-after-steps") ? { crashAfterSteps: Number(flag("crash-after-steps")) } : {}), ...(flag("tasks") ? { tasks: flag("tasks")!.split(",") } : {}), ...(flag("label") ? { label: flag("label")! } : {}), parallel: Number(flag("parallel") ?? 3) });
