@@ -237,7 +237,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
       afterOk(n, findings.length);
     } catch (e) {
       // A model call that failed or returned garbage is a transient fault of the provider, not a harness bug.
-      const cat = e instanceof SkillError ? e.category : /LLM|model returned/.test(String(e)) ? "provider_transient" : "harness_bug";
+      const msg = String(e);
+      const cat = e instanceof SkillError ? e.category : /LLM 40[123]|Insufficient Balance|invalid api key/i.test(msg) ? "provider_fatal" : /LLM|model returned/.test(msg) ? "provider_transient" : "harness_bug";
+      if (cat === "provider_fatal") fatal = msg.slice(0, 300);
       emit({ t: "fail", at: now(), id: n.id, category: cat, message: String((e as Error).message ?? e).slice(0, 2000) });
       outcome = "fail"; category = cat;
       if (state.nodes.get(n.id)!.status === "pending") {
@@ -254,7 +256,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   };
 
   const running = new Map<string, Promise<void>>();
+  let fatal: string | undefined;
   for (;;) {
+    if (fatal) break; // nothing new starts once the provider is unusable; running nodes finish
     for (const b of blocked(state)) emit({ t: "skip", at: now(), id: b.id, reason: b.reason });
     for (const n of ready(state)) {
       if (running.size >= concurrency) break;
@@ -264,7 +268,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     if (!running.size) break;
     await Promise.race(running.values());
   }
-  if (settled(state) && !state.done) emit({ t: "done", at: now() });
+  while (running.size) await Promise.race(running.values());
+  if (fatal) writeFileSync(join(runDir, "stopped.json"), JSON.stringify({ reason: "provider_fatal", detail: fatal, at: now() }));
+  if (settled(state) && !state.done && !fatal) emit({ t: "done", at: now() });
 
   const m = manifest();
   const arts = state.order.flatMap((id) => state.nodes.get(id)!.artifacts.map((a) => ({ node: id, name: a.name, sha256: a.sha256 })));

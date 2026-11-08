@@ -15,7 +15,7 @@ import { parseDiff, riskOf } from "./patchrisk.ts";
 import { CLAIMS_PROMPT, DEBUG_ROLE, ENV_ROLE, PLAN_ROLE } from "./roles.ts";
 import type { SiteManager } from "./site.ts";
 import { Budget, gpuPrice, modalRun } from "../backends/modal.ts";
-import { DATA_DOMAINS, GPUS, gpuPlanOf, validateGpuPlan, type Stage } from "./gpu.ts";
+import { DATA_DOMAINS, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, validateGpuPlan, type Stage } from "./gpu.ts";
 import { GPU_PLAN_ROLE } from "./roles.ts";
 
 export interface ReproCtx {
@@ -41,14 +41,15 @@ export function currentSite(s: RunState): string | undefined {
 
 // Agents' commands run in remote containers when the run uses Modal: network allowed (they install and
 // download while exploring), no credentials inside, GPU time charged to the paper's budget.
-const remoteFor = (ctx: SkillCtx, pip: string[]) => {
+const remoteFor = (ctx: SkillCtx, pip: string[], image?: string) => {
   const g = need(ctx).gpu;
   if (!g) return {};
-  return { remote: { pip, gpus: GPUS, run: async (ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[] }) => {
-    const r = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: o.timeoutS, network: true, pip: o.pip, ...(o.gpu ? { gpu: o.gpu } : {}) }, g.budget);
+  return { remote: { pip, gpus: GPUS, images: IMAGES, image: image ?? DEFAULT_IMAGE_KEY, run: async (ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[]; image?: string }) => {
+    const r = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: o.timeoutS, network: true, pip: o.pip, image: IMAGES[o.image ?? DEFAULT_IMAGE_KEY]!, ...(o.gpu ? { gpu: o.gpu } : {}) }, g.budget);
     return { code: r.exitCode, stdout: r.stdout, stderr: r.stderr, category: r.category, costUsd: r.costUsd };
   } } };
 };
+export const imageOf = (s: RunState): string => (s.nodes.get(N.env)?.output as { image?: string } | undefined)?.image ?? DEFAULT_IMAGE_KEY;
 export const pipOf = (s: RunState): string[] => {
   let pip = (s.nodes.get(N.env)?.output as { pip?: string[] } | undefined)?.pip ?? [];
   for (const id of s.order) if (id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded") { const p = s.nodes.get(id)!.output as { accepted: boolean; pip?: string[] }; if (p.accepted && p.pip) pip = p.pip; }
@@ -131,7 +132,7 @@ export function smokeVerdict(exit: number | null, output: string): { ok: boolean
   return { ok: false, why: `the command exited with status ${exit}` };
 }
 
-async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string, string>; example_command?: string[] } | undefined, pip: string[], site: string | undefined): Promise<{ ok: boolean; why: string; command: string; tail: string }> {
+async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string, string>; example_command?: string[] } | undefined, pip: string[], site: string | undefined, image?: string): Promise<{ ok: boolean; why: string; command: string; tail: string }> {
   const argv = Array.isArray(launch?.example_command) ? launch!.example_command.map(String) : [];
   if (!argv.length) return { ok: false, why: "the environment agent gave no launch command", command: "", tail: "" };
   const env = Object.fromEntries(Object.entries(launch?.env ?? {}).filter(([k, v]) => /^[A-Z_][A-Z0-9_]*$/.test(k) && typeof v === "string" && !/^(PATH|HOME|LD_|PYTHONHOME)/.test(k))) as Record<string, string>;
@@ -140,7 +141,7 @@ async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string,
   const g = need(ctx).gpu;
   let out: string, err: string;
   if (g) {
-    const r = await modalRun({ repo: need(ctx).versionDir(0), cmd: script, gpu: "T4", timeoutS: SMOKE_S + 600, pip, env, network: true }, g.budget);
+    const r = await modalRun({ repo: need(ctx).versionDir(0), cmd: script, gpu: "T4", timeoutS: SMOKE_S + 600, pip, env, network: true, image: IMAGES[image ?? DEFAULT_IMAGE_KEY]! }, g.budget);
     out = r.stdout; err = r.stderr;
   } else {
     const sb = Sandbox.create(join(ctx.workDir(), ".."), `${ctx.node.id}-smoke`, need(ctx).versionDir(0), { isolation: ctx.isolation, limits: { cpuSec: SMOKE_S * 2, memMB: 8192, fileMB: 2048, timeoutMs: (SMOKE_S + 60) * 1000 }, stats: ctx.stats, ...(site ? { site } : {}) });
@@ -156,7 +157,7 @@ const env: Skill = {
   summary: "The environment agent installs what the repository needs and finds how to launch it; it may not edit code.",
   output: any,
   async run(ctx) {
-    const remote = need(ctx).gpu ? " Commands run in a remote Linux container with CUDA PyTorch 2.5.1 preinstalled; the packages you install are added to the remote image used by every later stage. Check imports on CPU; use a GPU only for a short probe if needed." : "";
+    const remote = need(ctx).gpu ? ` Commands run in a remote Linux container (default image ${DEFAULT_IMAGE_KEY}: Python 3.11, CUDA PyTorch 2.5.1). If the repository needs an older Python/PyTorch, switch the base image with install(image=...) FIRST (${Object.keys(IMAGES).join(", ")}) rather than forcing old packages into a new Python. Packages and image you choose are used by every later stage. Check imports on CPU; use a GPU only for a short probe if needed.` : "";
     const base = { ...loopBase(ctx), ...remoteFor(ctx, []), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}` };
     let r = await agentLoop({ ...base, role: ENV_ROLE });
     // Complex repositories need more than one step budget: an agent that stopped at its limit with the
@@ -167,12 +168,12 @@ const env: Skill = {
     if (!r.report) throw new SkillError("experiment_error", "environment agent ran out of steps without a report");
     // Harness-verified: the launch command must actually start. One repair round if it does not.
     const claimed = r.report.runnable === true;
-    let sm = await smoke(ctx, r.report.launch as never, r.pip, r.site);
+    let sm = await smoke(ctx, r.report.launch as never, r.pip, r.site, r.image);
     if (!sm.ok) {
       const fix = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: r.steps + ENV_ROLE.maxSteps }, continueWith: `The harness started your launch command (${sm.command}) for ${SMOKE_S} s and it failed: ${sm.why}.\nOutput tail:\n${sm.tail}\nFix the environment (not the code) and report again with a launch command that starts.` });
-      if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site); }
+      if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site, r.image); }
     }
-    return { output: { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, steps: r.steps } };
+    return { output: { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps } };
   },
 };
 
@@ -188,7 +189,7 @@ const plan: Skill = {
       // Multi-stage plan on remote GPUs, validated (structure, GPU allowlist, worst-case cost) by the harness.
       let feedback = "";
       for (let attempt = 0; attempt < 3; attempt++) {
-        const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state)), paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip })}`,
+        const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip })}`,
           // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
           role: { ...GPU_PLAN_ROLE, maxSteps: GPU_PLAN_ROLE.maxSteps + attempt * 10 }, ...(feedback ? { continueWith: feedback.trim() } : {}) });
         const src0 = need(ctx).versionDir(0);
@@ -293,7 +294,7 @@ const debug: Skill = {
     const site = currentSite(ctx.state);
     const evidence = why === "failure" ? `The run failed:\n${failureText(ctx.state, failedRun).slice(0, 3000)}` : `The runs gave ${JSON.stringify(outOf<{ values: number[]; mean: number }>(ctx.state, String(ctx.node.params.trigger)))} but the paper claims ${c.value}.`;
     const prior = ctx.state.order.filter((id) => id.startsWith(`${N.debug}:${claim}:`) && id !== ctx.node.id && ctx.state.nodes.get(id)!.status === "succeeded").map((id) => outOf<{ causes: unknown; patch_intent?: string }>(ctx.state, id));
-    const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state)), role: DEBUG_ROLE, workDir: ctx.workDir(), source: base, ...(site ? { site } : {}), task: (need(ctx).gpu ? `Budget left for this paper: $${need(ctx).gpu!.budget.remaining().toFixed(2)}. ` : "") + `Objective: ${ctx.state.objective}\nClaim: ${JSON.stringify(c)}\nPlanned run: ${JSON.stringify(spec)}\n${evidence}\nEnvironment notes: ${JSON.stringify(outOf<Record<string, unknown>>(ctx.state, N.env)?.launch ?? {})}\nEarlier diagnoses for this claim: ${JSON.stringify(prior)}` });
+    const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), role: DEBUG_ROLE, workDir: ctx.workDir(), source: base, ...(site ? { site } : {}), task: (need(ctx).gpu ? `Budget left for this paper: $${need(ctx).gpu!.budget.remaining().toFixed(2)}. ` : "") + `Objective: ${ctx.state.objective}\nClaim: ${JSON.stringify(c)}\nPlanned run: ${JSON.stringify(spec)}\n${evidence}\nEnvironment notes: ${JSON.stringify(outOf<Record<string, unknown>>(ctx.state, N.env)?.launch ?? {})}\nEarlier diagnoses for this claim: ${JSON.stringify(prior)}` });
     if (!r.report) throw new SkillError("experiment_error", "debugger ran out of steps without a report");
     const changed = changedFiles(base, r.workspace);
     const diff = changed.length ? await unifiedDiff(base, r.workspace, changed) : "";
@@ -360,7 +361,7 @@ const stage: Skill = {
     });
     const persist = st.persist.map((path) => ({ from: path, to: `${area(st, seed)}/${path}` }));
     const cmd = st.cwd ? ["bash", "-c", 'cd "$1" && shift && exec "$@"', "bash", st.cwd, ...argv] : argv;
-    const r = await modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, pip: pipOf(ctx.state), restore, persist, ...(st.gpu ? { gpu: st.gpu } : {}) }, g.budget);
+    const r = await modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(st.gpu ? { gpu: st.gpu } : {}) }, g.budget);
     const log = join(ctx.workDir(), `${ctx.node.id.replace(/[^\w.-]+/g, "_")}.log`);
     mkdirSync(ctx.workDir(), { recursive: true });
     writeFileSync(log, `$ ${cmd.join(" ")}\n--- stdout\n${r.stdout.slice(-30000)}\n--- stderr\n${r.stderr.slice(-20000)}`);

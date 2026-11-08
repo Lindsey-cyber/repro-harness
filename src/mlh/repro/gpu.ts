@@ -25,6 +25,16 @@ export const DATA_DOMAINS = [
   "www.cs.toronto.edu", "people.eecs.berkeley.edu", "data.dgl.ai", "snap.stanford.edu", "ogb.stanford.edu", "nlp.stanford.edu",
   "*.dropboxusercontent.com", "www.dropbox.com", "drive.google.com", "drive.usercontent.google.com",
 ];
+// Base images the environment may choose (old repositories need old Python/PyTorch).
+export const IMAGES: Record<string, string> = {
+  "py3.11-torch2.5-cu124": "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime",
+  "py3.10-torch2.1-cu121": "pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime",
+  "py3.10-torch1.13-cu117": "pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime",
+  "py3.8-torch1.12-cu113": "pytorch/pytorch:1.12.1-cuda11.3-cudnn8-runtime",
+  "py3.8-torch1.9-cu111": "pytorch/pytorch:1.9.1-cuda11.1-cudnn8-runtime",
+  "py3.7-torch1.7-cu110": "pytorch/pytorch:1.7.1-cuda11.0-cudnn8-runtime",
+};
+export const DEFAULT_IMAGE_KEY = "py3.11-torch2.5-cu124";
 export interface FetchItem { url: string; to: string; sha256?: string; unpack?: "zip" | "tar" }
 export const MAX_STAGE_S = 6 * 3600;
 

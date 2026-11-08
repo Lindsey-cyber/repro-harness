@@ -4,6 +4,7 @@ export type FailureCategory =
   | "sandbox_transient" // the sandbox failed to start or died for reasons outside the experiment
   | "timeout"
   | "provider_transient" // the model provider failed or returned an unusable answer
+  | "provider_fatal" // out of balance or bad credentials: retrying cannot help, the run stops
   | "resource_limit" // cpu, memory or file-size limit hit
   | "experiment_error" // the repository's own code exited non-zero
   | "contract_violation" // a skill's output did not match its declared schema
