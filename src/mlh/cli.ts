@@ -38,6 +38,7 @@ async function main(): Promise<void> {
         runDir, source: positional[0]!, objective: flag("objective") ?? "Reproduce the paper's main results with this repository.", mode: "repro",
         arxiv: flag("arxiv")!, approvePolicy: (flag("approve") as "none" | "medium" | "all" | undefined) ?? "medium", concurrency: Number(flag("concurrency") ?? 3),
         ...(flag("crash-after-steps") ? { crashAfterSteps: Number(flag("crash-after-steps")) } : {}),
+        ...(flag("gpu-budget") ? { gpuBudgetUsd: Number(flag("gpu-budget")) } : {}),
         ...models(),
       });
       console.log(r.reportPath);

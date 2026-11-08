@@ -1,14 +1,17 @@
-"""Modal GPU backend for the reproduction harness: one JSON request on stdin, one JSON result on stdout.
+"""Modal execution backend for the reproduction harness: one JSON request on stdin, one JSON result on stdout.
 
 Untrusted repository code runs only inside a Modal Sandbox (an isolated container on Modal's
-infrastructure), never on the harness machine. The repository is uploaded into the sandbox; a
-persistent Modal Volume caches downloaded datasets/checkpoints across runs. Network inside the
-sandbox is blocked for experiment runs and allowed only when the request says so (the separately
-authorized fetch/install phase).
+infrastructure), never on the harness machine. No credential is ever placed inside a sandbox.
+
+Environment: a base image plus pip packages, built by Modal as a cached image layer (the network is
+used while building, not while the experiment runs unless the request allows it).
+
+State between stages lives in the persistent Volume "mlh-cache" mounted at /cache: `restore` copies
+earlier stages' outputs into the working copy before the command, `persist` copies outputs out after.
 
 ops:
   check  {} -> {app}
-  run    {repo, cmd, gpu, timeout_s, network, env, setup, outputs, image, cache_volume}
+  run    {repo, cmd, gpu, timeout_s, network, env, pip, image, restore, persist, outputs}
          -> {exit_code, stdout, stderr, elapsed_s, files: {relpath: text}}
 """
 import io
@@ -22,8 +25,8 @@ import time
 import modal
 
 APP = "mlh-repro"
-# A CUDA-enabled PyTorch base; repositories install the rest in their setup step.
 DEFAULT_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
+_images = {}
 
 
 def tar_dir(path):
@@ -33,10 +36,21 @@ def tar_dir(path):
             dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", ".mlh_in")]
             for f in files:
                 full = os.path.join(root, f)
-                if os.path.getsize(full) > 200 * 1024 * 1024:
+                if os.path.islink(full) or os.path.getsize(full) > 100 * 1024 * 1024:
                     continue  # large artifacts belong in the cache volume, not the upload
                 t.add(full, arcname=os.path.relpath(full, path))
     return buf.getvalue()
+
+
+def image_for(base, pip):
+    key = (base, tuple(pip))
+    if key not in _images:
+        img = modal.Image.from_registry(base)
+        # torch is already in the default base image; other torch-family wheels come from the CUDA index.
+        if pip:
+            img = img.pip_install(*pip)
+        _images[key] = img
+    return _images[key]
 
 
 def op_check(_req):
@@ -46,9 +60,9 @@ def op_check(_req):
 
 def op_run(req):
     app = modal.App.lookup(APP, create_if_missing=True)
-    image = modal.Image.from_registry(req.get("image") or DEFAULT_IMAGE)
+    image = image_for(req.get("image") or DEFAULT_IMAGE, req.get("pip") or [])
     vol = modal.Volume.from_name(req.get("cache_volume") or "mlh-cache", create_if_missing=True)
-    kwargs = dict(app=app, image=image, timeout=int(req["timeout_s"]) + 300, volumes={"/cache": vol},
+    kwargs = dict(app=app, image=image, timeout=int(req["timeout_s"]) + 600, volumes={"/cache": vol},
                   block_network=not req.get("network", False))
     if req.get("gpu"):
         kwargs["gpu"] = req["gpu"]
@@ -57,9 +71,15 @@ def op_run(req):
     try:
         sb.filesystem.write_bytes(tar_dir(req["repo"]), "/tmp/repo.tgz")
         sb.exec("bash", "-c", "mkdir -p /work && tar -xzf /tmp/repo.tgz -C /work", timeout=600).wait()
+        pre = " && ".join(
+            f"mkdir -p {shlex.quote(os.path.dirname('/work/' + r['to']) or '/work')} && cp -a {shlex.quote(r['from'])} {shlex.quote('/work/' + r['to'])}"
+            for r in (req.get("restore") or [])) or "true"
+        post = " ; ".join(
+            f"mkdir -p {shlex.quote(os.path.dirname(p['to']))} && cp -a {shlex.quote('/work/' + p['from'])} {shlex.quote(p['to'])}"
+            for p in (req.get("persist") or [])) or "true"
         env = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in (req.get("env") or {}).items())
         cmd = " ".join(shlex.quote(a) for a in req["cmd"])
-        script = f"cd /work && ({req.get('setup') or 'true'}) && {('env ' + env + ' ') if env else ''}{cmd}"
+        script = f"cd /work && ({pre}) && {('env ' + env + ' ') if env else ''}{cmd}; s=$?; ({post}) >/dev/null 2>&1; sync; exit $s"
         p = sb.exec("bash", "-c", script, timeout=int(req["timeout_s"]))
         out, err = p.stdout.read(), p.stderr.read()
         code = p.wait()

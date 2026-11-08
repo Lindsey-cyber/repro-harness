@@ -65,6 +65,36 @@ export const PLAN_ROLE: Role = {
   },
 };
 
+export const GPU_PLAN_ROLE: Role = {
+  name: "planner",
+  maxSteps: 25,
+  tools: ["list_files", "read_file", "run", "read_paper"],
+  writeCode: false,
+  system: `You are the planner of an ML reproduction team working on remote GPUs with a fixed dollar budget per paper. Given the paper's claims and the environment engineer's notes, design the reproduction as a DAG of stages, each one command of the repository run in a fresh container: e.g. fetch data/checkpoints (network allowed, no GPU) -> preprocess -> train or fine-tune (GPU) -> evaluate (GPU). Files a stage must hand to later stages are listed in its "persist" (repo-relative paths); they are restored for the stages that need it.
+
+Choose the fidelity that fits the budget, and say why: "full" (the paper's protocol), "scaled" (the paper's protocol at reduced epochs/data/model size; then claims about absolute numbers will likely not reproduce, so prefer claims about rankings/deltas), or "eval_only" (evaluate released checkpoints). The harness computes the worst case (each stage running to its timeout) and rejects plans above budget, so give realistic timeouts. GPU prices per hour: T4 $0.59, L4 $0.80, A10G $1.10, A100-40GB $2.10, A100-80GB $2.50, H100 $3.95.
+
+Each claim names the stage whose output contains its number and a regex with exactly one capture group (the last match is used). Commands must run scripts of the repository (no python -c / sh -c programs); if a needed script does not exist, plan it anyway and say so — the debugger adds it as a reviewed change. You may run short CPU commands to check scripts and flags; use the GPU only for very short probes.`,
+  report: {
+    description: "Finish with the stage plan.",
+    parameters: {
+      type: "object",
+      properties: {
+        fidelity: { type: "string", enum: ["full", "scaled", "eval_only"] },
+        fidelityNote: { type: "string" },
+        stages: { type: "array", items: { type: "object", properties: {
+          id: { type: "string" }, argv: { type: "array", items: { type: "string" } }, gpu: { type: "string" }, timeoutS: { type: "integer" },
+          needs: { type: "array", items: { type: "string" } }, persist: { type: "array", items: { type: "string" } }, network: { type: "boolean" },
+          perSeed: { type: "boolean" }, env: { type: "object" }, cwd: { type: "string" },
+        }, required: ["id", "argv", "timeoutS"] } },
+        claims: { type: "array", items: { type: "object", properties: { claim: { type: "string" }, stage: { type: "string" }, parse: { type: "string" }, scale: { type: "number" } }, required: ["claim", "stage", "parse"] } },
+        seeds: { type: "array", items: { type: "integer" } }, seedArg: { type: "string" }, seedEnv: { type: "string" },
+      },
+      required: ["fidelity", "stages", "claims"],
+    },
+  },
+};
+
 export const DEBUG_ROLE: Role = {
   name: "debugger",
   maxSteps: 30,

@@ -2,6 +2,7 @@
 // never on this machine; this module uploads, launches and reads results through
 // the Modal SDK (modal_runner.py). A dollar budget is enforced before every
 // launch: a run whose worst case would exceed what is left is refused.
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FailureCategory } from "../core/types.ts";
 import { runProc } from "../io/proc.ts";
@@ -16,26 +17,36 @@ export const gpuPrice = (gpu: string) => Number(process.env[`MLH_GPU_PRICE_${gpu
 export interface RemoteRun {
   repo: string; cmd: string[]; gpu?: string; timeoutS: number; network?: boolean;
   env?: Record<string, string>; setup?: string; outputs?: string[]; image?: string;
+  pip?: string[]; // installed into the image (cached by Modal), not at run time
+  restore?: { from: string; to: string }[]; // /cache/... -> repo-relative, before the command
+  persist?: { from: string; to: string }[]; // repo-relative -> /cache/..., after the command
 }
 export interface RemoteResult { exitCode: number; stdout: string; stderr: string; elapsedS: number; costUsd: number; files: Record<string, string>; category: FailureCategory | null }
 
 export class Budget {
   spent = 0;
-  constructor(readonly limitUsd: number) {}
+  // With a file, spending survives a crash: a resumed run continues from what it already spent.
+  constructor(readonly limitUsd: number, private readonly file?: string) {
+    if (file && existsSync(file)) this.spent = Number(JSON.parse(readFileSync(file, "utf8")).spent) || 0;
+  }
   // Container start-up and upload add a few minutes on top of the run's own timeout.
   worstCase(r: RemoteRun): number { return r.gpu ? (gpuPrice(r.gpu) * (r.timeoutS + 300)) / 3600 : (0.05 * r.timeoutS) / 3600; }
   admit(r: RemoteRun): string | null {
     const w = this.worstCase(r);
     return this.spent + w > this.limitUsd ? `budget: worst case $${w.toFixed(2)} exceeds the remaining $${(this.limitUsd - this.spent).toFixed(2)}` : null;
   }
-  charge(usd: number) { this.spent += usd; }
+  charge(usd: number) {
+    this.spent += usd;
+    if (this.file) writeFileSync(this.file, JSON.stringify({ spent: this.spent, limit: this.limitUsd }));
+  }
+  remaining(): number { return this.limitUsd - this.spent; }
 }
 
 async function call(req: Record<string, unknown>, timeoutMs: number): Promise<Record<string, unknown>> {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/tmp", PYTHONPATH: MODAL_SITE,
     // The token secret is injected by the network proxy; the SDK only needs a placeholder to start.
-    MODAL_TOKEN_ID: process.env.MODAL_TOKEN_ID ?? "", MODAL_TOKEN_SECRET: process.env.MODAL_TOKEN_SECRET ?? "proxy-injected",
+    MODAL_TOKEN_ID: process.env.MODAL_TOKEN_ID ?? "", MODAL_TOKEN_SECRET: process.env.MODAL_TOKEN_SECRET ?? "",
     ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}),
     ...(process.env.SSL_CERT_FILE ? { SSL_CERT_FILE: process.env.SSL_CERT_FILE, GRPC_DEFAULT_SSL_ROOTS_FILE_PATH: process.env.SSL_CERT_FILE } : {}),
     REQ: JSON.stringify(req), RUNNER,
@@ -107,7 +118,8 @@ export async function modalCheck(): Promise<{ ok: boolean; error?: string }> {
 export async function modalRun(run: RemoteRun, budget: Budget): Promise<RemoteResult> {
   const refused = budget.admit(run);
   if (refused) return { exitCode: -1, stdout: "", stderr: refused, elapsedS: 0, costUsd: 0, files: {}, category: "policy_denied" };
-  const r = await call({ op: "run", repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, setup: run.setup, outputs: run.outputs ?? [], image: run.image }, (run.timeoutS + 900) * 1000);
+  // An image with new pip packages takes a few minutes to build the first time.
+  const r = await call({ op: "run", repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [] }, (run.timeoutS + 2400) * 1000);
   if (!r.ok) {
     const e = String(r.error);
     return { exitCode: -1, stdout: "", stderr: e, elapsedS: 0, costUsd: 0, files: {}, category: /Timeout|timed out|deadline/i.test(e) ? "timeout" : /Auth|Token/i.test(e) ? "precondition" : "sandbox_transient" };

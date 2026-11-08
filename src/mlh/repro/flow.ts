@@ -3,6 +3,7 @@
 // agent proposes (validated here), runs that fail or miss, patches that are
 // accepted. Nothing here knows a benchmark task.
 import type { RunState, TaskNode } from "../core/dag.ts";
+import { gpuPlanOf, stageNodes } from "./gpu.ts";
 
 export const N = { paper: "repro.paper", claims: "repro.claims", env: "repro.env", plan: "repro.plan", run: "repro.run", compare: "repro.compare", debug: "repro.debug", patch: "repro.patch" } as const;
 export const MAX_DEBUG_ROUNDS = 2; // per claim
@@ -93,7 +94,7 @@ export function afterOk(s: RunState, id: string): TaskNode[] {
   const n = s.nodes.get(id)!.node;
   if (id === N.paper) return [{ id: N.claims, skill: N.claims, deps: [N.paper], purpose: "setup", params: {} }];
   if ((id === N.claims || id === N.env) && ok(s, N.claims) && ok(s, N.env) && !s.nodes.has(N.plan)) return [{ id: N.plan, skill: N.plan, deps: [N.claims, N.env], purpose: "setup", params: {} }];
-  if (id === N.plan) return runNodes(s, specsOf(s).map((x) => x.claim), "");
+  if (id === N.plan) return gpuPlanOf(s) ? stageNodes(s, "") : runNodes(s, specsOf(s).map((x) => x.claim), "");
   if (n.skill === N.compare) {
     const st = (s.nodes.get(id)!.output as { status: Status }).status;
     return st === "not_reproduced" ? debugNode(s, String(n.params.claim), id, "mismatch") : [];
@@ -107,7 +108,8 @@ export function afterOk(s: RunState, id: string): TaskNode[] {
     // An accepted change (new source version or new command) means every claim is measured again.
     // Runs are tagged by the patch count, so a command-only change does not collide with earlier runs.
     const k = s.order.filter((x) => x.startsWith(N.patch) && (s.nodes.get(x)!.output as PatchOut | undefined)?.accepted).length;
-    return p.accepted ? runNodes(s, specsOf(s).map((x) => x.claim), `.p${k}`) : [];
+    if (!p.accepted) return [];
+    return gpuPlanOf(s) ? stageNodes(s, `.p${k}`) : runNodes(s, specsOf(s).map((x) => x.claim), `.p${k}`);
   }
   return [];
 }
@@ -115,6 +117,14 @@ export function afterOk(s: RunState, id: string): TaskNode[] {
 // New nodes after a node failed for good.
 export function afterFail(s: RunState, id: string): TaskNode[] {
   const n = s.nodes.get(id)!.node;
+  if (n.skill === "repro.stage") {
+    // A failed stage is debugged once per stage and source version (budget permitting, ≤ MAX_DEBUG_ROUNDS per stage).
+    const stage = String(n.params.stage);
+    if (s.order.filter((x) => x.startsWith(`${N.debug}:stage-${stage}:`)).length >= MAX_DEBUG_ROUNDS) return [];
+    const did = `${N.debug}:stage-${stage}:v${currentVersion(s).version}`;
+    if (s.nodes.has(did)) return [];
+    return [{ id: did, skill: N.debug, deps: [N.plan], purpose: "setup", params: { claim: `stage-${stage}`, stage, version: currentVersion(s).version, why: "failure", failedRun: id } }];
+  }
   if (n.skill === N.run) return debugNode(s, String(n.params.claim), N.plan, "failure").map((d) => ({ ...d, params: { ...d.params, failedRun: id } }));
   return [];
 }

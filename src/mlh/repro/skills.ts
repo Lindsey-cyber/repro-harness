@@ -14,12 +14,17 @@ import { buildVersion, changedFiles, unifiedDiff } from "./patch.ts";
 import { parseDiff, riskOf } from "./patchrisk.ts";
 import { CLAIMS_PROMPT, DEBUG_ROLE, ENV_ROLE, PLAN_ROLE } from "./roles.ts";
 import type { SiteManager } from "./site.ts";
+import { Budget, gpuPrice, modalRun } from "../backends/modal.ts";
+import { GPUS, gpuPlanOf, validateGpuPlan, type Stage } from "./gpu.ts";
+import { GPU_PLAN_ROLE } from "./roles.ts";
 
 export interface ReproCtx {
   arxiv: string;
   sites: SiteManager;
   versionDir(v: number): string;
   approvePolicy: "none" | "medium" | "all";
+  // Remote GPU execution (Modal). Absent: everything runs in the local sandbox.
+  gpu?: { budget: Budget; runKey: string };
 }
 
 const any = z.record(z.string(), z.unknown());
@@ -33,6 +38,22 @@ export function currentSite(s: RunState): string | undefined {
   for (const id of s.order) if (id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded") { const p = outOf<{ accepted: boolean; site?: string }>(s, id); if (p.accepted && p.site) site = p.site; }
   return site;
 }
+
+// Agents' commands run in remote containers when the run uses Modal: network allowed (they install and
+// download while exploring), no credentials inside, GPU time charged to the paper's budget.
+const remoteFor = (ctx: SkillCtx, pip: string[]) => {
+  const g = need(ctx).gpu;
+  if (!g) return {};
+  return { remote: { pip, gpus: GPUS, run: async (ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[] }) => {
+    const r = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: o.timeoutS, network: true, pip: o.pip, ...(o.gpu ? { gpu: o.gpu } : {}) }, g.budget);
+    return { code: r.exitCode, stdout: r.stdout, stderr: r.stderr, category: r.category, costUsd: r.costUsd };
+  } } };
+};
+export const pipOf = (s: RunState): string[] => {
+  let pip = (s.nodes.get(N.env)?.output as { pip?: string[] } | undefined)?.pip ?? [];
+  for (const id of s.order) if (id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded") { const p = s.nodes.get(id)!.output as { accepted: boolean; pip?: string[] }; if (p.accepted && p.pip) pip = p.pip; }
+  return pip;
+};
 
 const loopBase = (ctx: SkillCtx) => ({
   model: models(ctx).proposer, isolation: ctx.isolation, isolationEvidence: ctx.isolationEvidence, checkpoint: true,
@@ -104,9 +125,10 @@ const env: Skill = {
   summary: "The environment agent installs what the repository needs and finds how to launch it; it may not edit code.",
   output: any,
   async run(ctx) {
-    const r = await agentLoop({ ...loopBase(ctx), role: ENV_ROLE, workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.` });
+    const remote = need(ctx).gpu ? " Commands run in a remote Linux container with CUDA PyTorch 2.5.1 preinstalled; the packages you install are added to the remote image used by every later stage. Check imports on CPU; use a GPU only for a short probe if needed." : "";
+    const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, []), role: ENV_ROLE, workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}` });
     if (!r.report) throw new SkillError("experiment_error", "environment agent ran out of steps without a report");
-    return { output: { ...r.report, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), steps: r.steps } };
+    return { output: { ...r.report, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, steps: r.steps } };
   },
 };
 
@@ -117,6 +139,18 @@ const plan: Skill = {
   async run(ctx) {
     const cs = claimsOf(ctx.state);
     const e = outOf<Record<string, unknown>>(ctx.state, N.env);
+    const g = need(ctx).gpu;
+    if (g) {
+      // Multi-stage plan on remote GPUs, validated (structure, GPU allowlist, worst-case cost) by the harness.
+      let feedback = "";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state)), paper: paperText(ctx), role: GPU_PLAN_ROLE, workDir: join(ctx.workDir(), `a${attempt}`), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip })}${feedback}` });
+        const v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: gpuPrice });
+        if (v.plan) return { output: { specs: [], errors: [], gpuPlan: v.plan } };
+        feedback = `\n\nYour previous plan was rejected: ${v.errors.join("; ")}. Fix it.`;
+      }
+      throw new SkillError("contract_violation", `no valid stage plan after 3 attempts${feedback}`);
+    }
     const site = currentSite(ctx.state);
     const r = await agentLoop({ ...loopBase(ctx), role: PLAN_ROLE, workDir: ctx.workDir(), source: need(ctx).versionDir(0), ...(site ? { site } : {}), task: `Objective: ${ctx.state.objective}\nClaims (values are fractions):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, installed: e.specs })}` });
     const v = validatePlan(cs, r.report);
@@ -187,7 +221,8 @@ const compare: Skill = {
   async run(ctx) {
     const claim = String(ctx.node.params.claim);
     const c = claimsOf(ctx.state).find((x) => x.id === claim)!;
-    const values = ctx.node.deps.map((d) => (ctx.state.nodes.get(d)!.output as { value: number }).value);
+    const values = ctx.node.deps.map((d) => { const o = ctx.state.nodes.get(d)!.output as { value?: number; values?: Record<string, number> }; return o.values?.[claim] ?? o.value!; }).filter((v) => typeof v === "number");
+    if (!values.length) throw new SkillError("experiment_error", `no stage output carries a value for ${claim}`);
     const s = statusOf(c, values);
     return { output: { claim, ...s, values, value: c.value } };
   },
@@ -203,20 +238,22 @@ const debug: Skill = {
   summary: "The debugger agent diagnoses a failed or mismatching claim in its own copy; its edits become a proposed patch.",
   output: any,
   async run(ctx) {
-    const { claim, version, why, failedRun } = ctx.node.params as { claim: string; version: number; why: string; failedRun?: string };
-    const c = claimsOf(ctx.state).find((x) => x.id === claim)!;
-    const spec = specsOf(ctx.state).find((x) => x.claim === claim)!;
+    const { claim, version, why, failedRun, stage: stageName } = ctx.node.params as { claim: string; version: number; why: string; failedRun?: string; stage?: string };
+    const gp = gpuPlanOf(ctx.state);
+    const c = claimsOf(ctx.state).find((x) => x.id === claim) ?? { id: claim, metric: "", value: NaN };
+    const spec: unknown = gp ? (stageName ? gp.stages.find((x) => x.id === stageName) : gp) : specsOf(ctx.state).find((x) => x.claim === claim)!;
     const base = need(ctx).versionDir(version);
     const site = currentSite(ctx.state);
     const evidence = why === "failure" ? `The run failed:\n${failureText(ctx.state, failedRun).slice(0, 3000)}` : `The runs gave ${JSON.stringify(outOf<{ values: number[]; mean: number }>(ctx.state, String(ctx.node.params.trigger)))} but the paper claims ${c.value}.`;
     const prior = ctx.state.order.filter((id) => id.startsWith(`${N.debug}:${claim}:`) && id !== ctx.node.id && ctx.state.nodes.get(id)!.status === "succeeded").map((id) => outOf<{ causes: unknown; patch_intent?: string }>(ctx.state, id));
-    const r = await agentLoop({ ...loopBase(ctx), role: DEBUG_ROLE, workDir: ctx.workDir(), source: base, ...(site ? { site } : {}), task: `Objective: ${ctx.state.objective}\nClaim: ${JSON.stringify(c)}\nPlanned run: ${JSON.stringify(spec)}\n${evidence}\nEnvironment notes: ${JSON.stringify(outOf<Record<string, unknown>>(ctx.state, N.env)?.launch ?? {})}\nEarlier diagnoses for this claim: ${JSON.stringify(prior)}` });
+    const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state)), role: DEBUG_ROLE, workDir: ctx.workDir(), source: base, ...(site ? { site } : {}), task: (need(ctx).gpu ? `Budget left for this paper: $${need(ctx).gpu!.budget.remaining().toFixed(2)}. ` : "") + `Objective: ${ctx.state.objective}\nClaim: ${JSON.stringify(c)}\nPlanned run: ${JSON.stringify(spec)}\n${evidence}\nEnvironment notes: ${JSON.stringify(outOf<Record<string, unknown>>(ctx.state, N.env)?.launch ?? {})}\nEarlier diagnoses for this claim: ${JSON.stringify(prior)}` });
     if (!r.report) throw new SkillError("experiment_error", "debugger ran out of steps without a report");
     const changed = changedFiles(base, r.workspace);
     const diff = changed.length ? await unifiedDiff(base, r.workspace, changed) : "";
     const argv = Array.isArray(r.report.run_argv) && r.report.run_argv.length ? (r.report.run_argv as unknown[]).map(String) : undefined;
     if (diff) { const f = join(ctx.workDir(), "patch.diff"); writeFileSync(f, diff); ctx.save("patch.diff", f); }
-    return { output: { claim, causes: r.report.causes ?? [], patch_intent: r.report.patch_intent ?? "", expected_effect: r.report.expected_effect ?? "", changed, diff: diff.slice(0, 30000), ...(argv ? { run_argv: argv } : {}), hasPatch: changed.length > 0 || !!argv, workspace: r.workspace, ...(r.site ? { site: r.site } : {}), steps: r.steps } };
+    const pipChanged = need(ctx).gpu && JSON.stringify(r.pip) !== JSON.stringify(pipOf(ctx.state));
+    return { output: { claim, causes: r.report.causes ?? [], patch_intent: r.report.patch_intent ?? "", expected_effect: r.report.expected_effect ?? "", changed, diff: diff.slice(0, 30000), ...(argv ? { run_argv: argv } : {}), hasPatch: changed.length > 0 || !!argv || !!pipChanged, workspace: r.workspace, ...(r.site ? { site: r.site } : {}), ...(pipChanged ? { pip: r.pip } : {}), steps: r.steps } };
   },
 };
 
@@ -226,8 +263,9 @@ const patch: Skill = {
   output: any,
   async run(ctx) {
     const { claim, from, debug: dbg } = ctx.node.params as { claim: string; from: number; debug: string };
-    const d = outOf<{ diff: string; changed: string[]; run_argv?: string[]; workspace: string; site?: string }>(ctx.state, dbg);
-    const spec = specsOf(ctx.state).find((x) => x.claim === claim)!;
+    const d = outOf<{ diff: string; changed: string[]; run_argv?: string[]; workspace: string; site?: string; pip?: string[] }>(ctx.state, dbg);
+    const gp = gpuPlanOf(ctx.state);
+    const spec = gp ? { argv: gp.stages.find((x) => `stage-${x.id}` === claim)?.argv ?? [] } : specsOf(ctx.state).find((x) => x.claim === claim)!;
     const files = parseDiff(d.diff, need(ctx).versionDir(from), d.workspace);
     const argvChange = d.run_argv ? [`${spec.argv.join(" ")} -> ${d.run_argv.join(" ")}`] : [];
     const { risk, reasons } = riskOf(files, claimsOf(ctx.state), argvChange);
@@ -245,8 +283,53 @@ const patch: Skill = {
       rmSync(dest, { recursive: true, force: true });
       buildVersion(need(ctx).versionDir(currentVersion(ctx.state).version), d.workspace, d.changed, dest);
     }
-    return { output: { accepted: true, risk, reasons, basis: decision.basis, ...(version !== undefined ? { version } : {}), ...(d.run_argv ? { argv: { [claim]: d.run_argv } } : {}), ...(d.site ? { site: d.site } : {}) } };
+    return { output: { accepted: true, risk, reasons, basis: decision.basis, ...(version !== undefined ? { version } : {}), ...(d.run_argv ? { argv: { [claim]: d.run_argv } } : {}), ...(d.site ? { site: d.site } : {}), ...(d.pip ? { pip: d.pip } : {}) } };
   },
 };
 
-export const REPRO_SKILLS: Skill[] = [paper, claims, env, plan, run, compare, debug, patch];
+// One stage of a GPU plan, in a fresh remote container: restore the outputs of the stages it needs,
+// run, persist its own outputs, and parse every claim this stage measures.
+const stage: Skill = {
+  id: "repro.stage", version: "1.0.0", purpose: "detect", intents: ["reproduce"], actions: ["exec_sandboxed"], after: [], needs: () => null,
+  summary: "Run one stage of the reproduction plan on a remote GPU (or CPU) container, charged to the paper's budget.",
+  output: any,
+  async run(ctx) {
+    const g = need(ctx).gpu;
+    if (!g) throw new SkillError("harness_bug", "stage nodes need the remote backend");
+    const p = gpuPlanOf(ctx.state)!;
+    const { stage: sid, version, tag, seed } = ctx.node.params as { stage: string; version: number; tag: string; seed?: number };
+    const st = p.stages.find((x) => x.id === sid)!;
+    const { argv: overrides } = currentVersion(ctx.state);
+    let argv = [...(overrides[`stage-${sid}`] ?? st.argv)];
+    const env: Record<string, string> = { ...(st.env ?? {}) };
+    if (seed !== undefined) {
+      if (p.seedArg) { const i = argv.indexOf(p.seedArg); if (i >= 0 && i + 1 < argv.length) argv[i + 1] = String(seed); else argv = [...argv, p.seedArg, String(seed)]; }
+      if (p.seedEnv) env[p.seedEnv] = String(seed);
+    }
+    const area = (s: Stage, sd?: number) => `/cache/runs/${g.runKey}/${tag}/${s.id}${sd !== undefined ? `-s${sd}` : ""}`;
+    const restore = st.needs.flatMap((n) => {
+      const dep = p.stages.find((x) => x.id === n)!;
+      return dep.persist.map((path) => ({ from: `${area(dep, dep.perSeed ? seed : undefined)}/${path}`, to: path }));
+    });
+    const persist = st.persist.map((path) => ({ from: path, to: `${area(st, seed)}/${path}` }));
+    const cmd = st.cwd ? ["bash", "-c", 'cd "$1" && shift && exec "$@"', "bash", st.cwd, ...argv] : argv;
+    const r = await modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, env, pip: pipOf(ctx.state), restore, persist, ...(st.gpu ? { gpu: st.gpu } : {}) }, g.budget);
+    const log = join(ctx.workDir(), `${ctx.node.id.replace(/[^\w.-]+/g, "_")}.log`);
+    mkdirSync(ctx.workDir(), { recursive: true });
+    writeFileSync(log, `$ ${cmd.join(" ")}\n--- stdout\n${r.stdout.slice(-30000)}\n--- stderr\n${r.stderr.slice(-20000)}`);
+    ctx.save("log", log);
+    const text = `${r.stdout}\n${r.stderr}`;
+    const values: Record<string, number> = {};
+    for (const c of p.claims.filter((x) => x.stage === sid)) {
+      const claim = claimsOf(ctx.state).find((x) => x.id === c.claim)!;
+      const v = parseMetric({ claim: c.claim, argv, seeds: [], parse: c.parse, timeoutS: st.timeoutS, ...(c.scale ? { scale: c.scale } : {}) }, claim.metric, text);
+      if (v !== undefined) values[c.claim] = v;
+    }
+    if (r.category && !(r.category === "timeout" && Object.keys(values).length)) throw new SkillError(r.category, `${argv.join(" ")} → ${r.category} (exit ${r.exitCode}): ${r.stderr.slice(-1500)}`);
+    const missing = p.claims.filter((x) => x.stage === sid && values[x.claim] === undefined).map((x) => x.claim);
+    if (missing.length) throw new SkillError("experiment_error", `stage ${sid} finished but its output has no value for ${missing.join(", ")}; tail:\n${r.stdout.slice(-800)}`);
+    return { output: { stage: sid, seed, values, version, elapsedS: Math.round(r.elapsedS), costUsd: Number(r.costUsd.toFixed(4)), spentUsd: Number(g.budget.spent.toFixed(4)) } };
+  },
+};
+
+export const REPRO_SKILLS: Skill[] = [paper, claims, env, plan, run, compare, debug, patch, stage];

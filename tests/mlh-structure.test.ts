@@ -25,8 +25,10 @@ describe("ml harness structure", () => {
     expect(patch.indexOf("authorize(")).toBeLessThan(patch.indexOf("buildVersion("));
     const site = code("src/mlh/repro/site.ts");
     expect(site.indexOf('authorize("install_packages"')).toBeLessThan(site.indexOf("network: true"));
-    // Only the install sandbox ever gets network.
-    expect(files("src/mlh").filter((f) => /network: true/.test(code(f)))).toEqual(["src/mlh/repro/site.ts"]);
+    // On this machine, only the install sandbox ever gets network.
+    expect(files("src/mlh").filter((f) => /Sandbox\.(create|attach)\([^)]*network: true/s.test(code(f)) || /network: true/.test(code(f)) && /Sandbox\./.test(code(f)) && f !== "src/mlh/repro/skills.ts")).toEqual(["src/mlh/repro/site.ts"]);
+    // Remote containers (Modal; isolated, no credentials inside) get network only from the reproduction skills.
+    expect(files("src/mlh").filter((f) => /modalRun\([^;]*network: (true|!!)/s.test(code(f)))).toEqual(["src/mlh/repro/skills.ts"]);
   });
 
   it("starts processes in exactly one module", () => {

@@ -8,6 +8,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { authorize, type Evidence } from "./core/authz.ts";
 import type { ChatMsg, ToolDef } from "./io/llm.ts";
 import { DEFAULT_LIMITS, Sandbox, SkillError, type Isolation, type Limits, type SandboxStats } from "./io/sandbox.ts";
+import { checkSpecs } from "./repro/site.ts";
 import type { ChatModel } from "./skills/index.ts";
 
 export type ToolName = "list_files" | "read_file" | "write_file" | "run" | "install" | "read_paper";
@@ -36,6 +37,13 @@ export interface LoopOptions {
   paper?: string; // full paper text for read_paper
   sandboxFault?: () => boolean;
   crashAfterSteps?: number;
+  // Remote execution (e.g. Modal): `run` uploads the working copy and runs there (optionally on a GPU);
+  // `install` adds packages to the remote image instead of a local site.
+  remote?: {
+    run(ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[] }): Promise<{ code: number; stdout: string; stderr: string; category: string | null; costUsd: number }>;
+    pip: string[]; // initial package list
+    gpus: string[]; // GPU types the role may ask for
+  };
 }
 
 export interface LoopResult {
@@ -47,9 +55,10 @@ export interface LoopResult {
   site?: string;
   workspace: string;
   resumedAt?: number;
+  pip: string[];
 }
 
-interface State { messages: ChatMsg[]; step: number; stats: SandboxStats; site?: string }
+interface State { messages: ChatMsg[]; step: number; stats: SandboxStats; site?: string; pip?: string[] }
 
 const CODE = /\.(py|pyx|ipynb|sh|c|cc|cpp|cu|h)$/i;
 
@@ -74,7 +83,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   if (!st) {
     rmSync(ws, { recursive: true, force: true });
     cpSync(o.source, ws, { recursive: true, filter: (p) => !/\/(\.git|__pycache__)(\/|$)/.test(p) });
-    st = { messages: [{ role: "system", content: o.role.system }, { role: "user", content: o.task }], step: 0, stats: { runs: 0, ms: 0 }, ...(o.site ? { site: o.site } : {}) };
+    st = { messages: [{ role: "system", content: o.role.system }, { role: "user", content: o.task }], step: 0, stats: { runs: 0, ms: 0 }, ...(o.site ? { site: o.site } : {}), ...(o.remote ? { pip: [...o.remote.pip] } : {}) };
   }
   const state = st;
   const limits = o.limits ?? DEFAULT_LIMITS;
@@ -84,8 +93,13 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     writeFileSync(statePath + ".tmp", JSON.stringify(state));
     renameSync(statePath + ".tmp", statePath);
   };
-  const tools = [...o.role.tools.map((t) => DEFS[t]), { type: "function" as const, function: { name: "report", description: o.role.report.description, parameters: o.role.report.parameters } }];
-  const finish = (report: Record<string, unknown> | null, stopped: LoopResult["stopped"]): LoopResult => ({ report, steps: state.step, sandboxRuns: state.stats.runs, sandboxMs: Math.round(state.stats.ms), stopped, workspace: ws, ...(state.site ? { site: state.site } : {}), ...(resumedAt !== undefined ? { resumedAt } : {}) });
+  const remoteDefs: Partial<Record<ToolName, ToolDef>> = o.remote ? {
+    run: { type: "function", function: { name: "run", description: `Run a shell command in the repository root inside a remote sandbox (Linux, CUDA PyTorch 2.5.1 plus the packages installed so far). Omit gpu for CPU (cheap); gpu one of ${o.remote.gpus.join(", ")} costs money from the paper's budget. Your local edits are uploaded on every call; files the command writes are NOT kept, except under /cache (a persistent volume). Returns exit code and output tails.`, parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer" }, gpu: { type: "string" } }, required: ["command"] } } },
+    install: { type: "function", function: { name: "install", description: "Add pip requirement specifiers to the remote image (e.g. 'transformers==4.30.2'); later runs use them. torch 2.5.1 with CUDA is preinstalled.", parameters: { type: "object", properties: { packages: { type: "array", items: { type: "string" } } }, required: ["packages"] } } },
+  } : {};
+  const defs: Record<ToolName, ToolDef> = { ...DEFS, ...remoteDefs };
+  const tools = [...o.role.tools.map((t) => defs[t]), { type: "function" as const, function: { name: "report", description: o.role.report.description, parameters: o.role.report.parameters } }];
+  const finish = (report: Record<string, unknown> | null, stopped: LoopResult["stopped"]): LoopResult => ({ report, steps: state.step, sandboxRuns: state.stats.runs, sandboxMs: Math.round(state.stats.ms), stopped, workspace: ws, pip: state.pip ?? [], ...(state.site ? { site: state.site } : {}), ...(resumedAt !== undefined ? { resumedAt } : {}) });
   let here = 0;
   while (state.step < o.role.maxSteps) {
     const step = state.step + 1;
@@ -131,6 +145,12 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             break;
           }
           case "run": {
+            if (o.remote) {
+              const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;
+              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(Number(args.timeout_s) || 600, 3600), pip: state.pip ?? [], ...(gpu ? { gpu } : {}) });
+              out = `exit ${r.category === "timeout" ? "timeout" : r.code}${r.costUsd ? ` (cost $${r.costUsd.toFixed(3)})` : ""}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.slice(-2500)}`;
+              break;
+            }
             const d = authorize(o.isolation === "namespace" ? "exec_sandboxed" : "exec_unsandboxed", [o.isolationEvidence]);
             if (!d.allow) { out = `denied: ${d.reason}`; break; }
             const r = await sandbox(Number(args.timeout_s) || undefined).run(["sh", "-c", String(args.command)]);
@@ -138,6 +158,14 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             break;
           }
           case "install": {
+            if (o.remote) {
+              const pk = (Array.isArray(args.packages) ? args.packages : []).map(String);
+              const ev = checkSpecs(pk);
+              if (!ev.ok) throw new Error(ev.check);
+              state.pip = [...new Set([...(state.pip ?? []), ...pk])];
+              out = `added to the remote image: ${state.pip.join(" ")} (built on the next run)`;
+              break;
+            }
             if (!o.install) throw new Error("installing is not available");
             const pk = (Array.isArray(args.packages) ? args.packages : []).map(String);
             const r = await o.install(pk, args.index === "pytorch-cpu" ? "https://download.pytorch.org/whl/cpu" : undefined, state.site);

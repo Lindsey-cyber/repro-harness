@@ -20,6 +20,8 @@ import { skill, SKILLS } from "./skills/registry.ts";
 import * as flow from "./repro/flow.ts";
 import { renderRepro } from "./repro/report.ts";
 import { siteManager } from "./repro/site.ts";
+import { Budget } from "./backends/modal.ts";
+import { createHash } from "node:crypto";
 
 // agentic: an exploring agent node leads; its findings are routed to independent confirmers.
 // repro: reproduce a paper's claims with specialized agents (src/mlh/repro).
@@ -44,6 +46,7 @@ export interface RunOptions {
   arxiv?: string;
   approvePolicy?: "none" | "medium" | "all";
   sitesDir?: string; // shared package sites (default .mlh/sites)
+  gpuBudgetUsd?: number; // run stages on Modal GPUs within this budget (per paper)
 }
 
 export interface RunResult {
@@ -102,7 +105,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     if (!o.source || !o.objective) throw new Error("a new run needs a source and an objective");
     mkdirSync(runDir, { recursive: true });
     const { rev } = await fetchSource(o.source, srcDir);
-    writeFileSync(join(runDir, "run.json"), JSON.stringify({ source: o.source, rev, objective: o.objective, mode, created: now(), ...(o.arxiv ? { arxiv: o.arxiv, approvePolicy: o.approvePolicy ?? "medium" } : {}) }, null, 1));
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({ source: o.source, rev, objective: o.objective, mode, created: now(), ...(o.arxiv ? { arxiv: o.arxiv, approvePolicy: o.approvePolicy ?? "medium" } : {}), ...(o.gpuBudgetUsd ? { gpuBudgetUsd: o.gpuBudgetUsd } : {}) }, null, 1));
     emit({ t: "run", at: now(), objective: o.objective, source: o.source, mode });
     for (const n of mode === "repro" ? flow.initialNodes() : initialPlan()) emit({ t: "node", at: now(), node: n, why: "initial plan" });
   } else if (!existsSync(srcDir)) throw new Error(`cannot resume ${runDir}: source copy missing`);
@@ -115,12 +118,15 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const limits = o.limits ?? DEFAULT_LIMITS;
   const concurrency = o.concurrency ?? 3;
   let completedHere = 0, retried = 0, attemptsHere = 0, llmTotal = zeroUsage();
-  const runMeta = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { arxiv?: string; approvePolicy?: "none" | "medium" | "all" };
+  const runMeta = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { arxiv?: string; approvePolicy?: "none" | "medium" | "all"; gpuBudgetUsd?: number };
+  const gpuBudget = runMeta.gpuBudgetUsd ?? o.gpuBudgetUsd;
   const repro = mode === "repro" ? {
     arxiv: runMeta.arxiv ?? o.arxiv ?? "",
     approvePolicy: runMeta.approvePolicy ?? o.approvePolicy ?? "medium",
     sites: siteManager(resolve(o.sitesDir ?? ".mlh/sites"), { isolation: st.isolation, stats }),
     versionDir: (v: number) => (v === 0 ? srcDir : join(runDir, "versions", `v${v}`)),
+    // Spending is saved next to the journal, so a resumed run continues from what it already spent.
+    ...(gpuBudget ? { gpu: { budget: new Budget(gpuBudget, join(runDir, "budget.json")), runKey: createHash("sha256").update(runDir).digest("hex").slice(0, 12) } } : {}),
   } : undefined;
   const specs = mode === "repro" ? SKILLS.filter((s) => s.id.startsWith("repro."))
     : SKILLS.filter((s) => !s.id.startsWith("repro.") && (o.llm || !s.actions.includes("model_query")) && (mode === "agentic" || (s.id !== AGENT && !s.id.startsWith("verify."))) && (mode !== "agentic" || !s.id.startsWith("llm.")));
