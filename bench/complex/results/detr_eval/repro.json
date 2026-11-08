@@ -1,0 +1,47 @@
+{
+ "objective": "Reproduce the COCO val2017 box AP of DETR with a ResNet-50 backbone (Table 1, 500-epoch model) by evaluating the released checkpoint with this repository.",
+ "source": "/tmp/claude-0/complex/detr",
+ "done": true,
+ "claims": [
+  {
+   "id": "detr_r50_coco_val2017_box_ap",
+   "metric": "AP",
+   "value": 0.42,
+   "table": "Table 1",
+   "dataset": "COCO val2017",
+   "method": "DETR (ResNet-50, 500-epoch model)",
+   "quote": "DETR 86/28 41M 42.0 62.4 44.2 20.5 45.8 61.1",
+   "status": "reproduced",
+   "version": 0,
+   "mean": 0.42,
+   "values": [
+    0.42
+   ],
+   "node": "repro.compare:detr_r50_coco_val2017_box_ap:v0"
+  }
+ ],
+ "plan": [],
+ "causes": [
+  {
+   "category": "env.missing_dependency",
+   "tier": "agent",
+   "evidence": "python -c \"import pycocotools\" -> ModuleNotFoundError: No module named 'pycocotools'; scipy also absent. The repo only documents conda installs / `pip install -U 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'` (requirements.txt has the same git+ URL), which is not usable wit",
+   "source": "repro.env"
+  },
+  {
+   "category": "env.path_or_config",
+   "tier": "agent",
+   "evidence": "main.py builds the *train* dataset unconditionally, even with --eval: `dataset_train = build_dataset(image_set='train', args=args)` -> FileNotFoundError: /cache/minicoco/annotations/instances_train2017.json. So --coco_path for the eval-only command must contain annotations/instances_train2017.json (",
+   "source": "repro.env"
+  },
+  {
+   "category": "env.path_or_config",
+   "tier": "agent",
+   "evidence": "models/backbone.py instantiates torchvision resnet50 with pretrained=True, so an ImageNet weight download from download.pytorch.org happens at model construction. Pre-cached to /cache/torch/hub/checkpoints/resnet50-0676ba61.pth and verified the eval runs with network blocked when TORCH_HOME=/cache/t",
+   "source": "repro.env"
+  }
+ ],
+ "patches": [],
+ "held": [],
+ "failed": []
+}
