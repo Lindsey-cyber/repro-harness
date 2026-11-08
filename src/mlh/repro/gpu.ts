@@ -104,14 +104,22 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   }
   const unknownHosts = [...new Set(fetch.map((f) => new URL(f.url).hostname).filter((h) => !DATA_HOSTS.some((d) => h === d || h.endsWith(`.${d}`))))];
   const cl: GpuPlan["claims"] = [];
+  // A planner sometimes names a claim by its description instead of its id: accept it when exactly one
+  // claim's value appears in the text (deterministic), and say which ids to use otherwise.
+  const pct = (v: number) => [String(v), (v * 100).toFixed(1), (v * 100).toFixed(2)];
+  const resolve = (name: string): string | undefined => {
+    if (claims.some((c) => c.id === name)) return name;
+    const hits = claims.filter((c) => pct(c.value).some((f) => new RegExp(`(?<![\\d.])${f.replace(".", "\\.")}(?![\\d])`).test(name)));
+    return hits.length === 1 ? hits[0]!.id : undefined;
+  };
   for (const c of claims) {
-    const m = (r.claims ?? []).find((x) => x?.claim === c.id);
-    if (!m) { errors.push(`no stage measures claim ${c.id}`); continue; }
+    const m = (r.claims ?? []).find((x) => typeof x?.claim === "string" && resolve(x.claim) === c.id);
+    if (!m) { errors.push(`no stage measures claim ${c.id} (set "claim" to exactly one of: ${claims.map((x) => JSON.stringify(x.id)).join(", ")})`); continue; }
     if (!stages.some((s) => s.id === m.stage)) { errors.push(`${c.id}: stage ${m.stage} does not exist`); continue; }
     let groups = -1;
     try { groups = new RegExp(`${String(m.parse)}|`).exec("")!.length - 1; } catch { /* invalid */ }
     if (groups !== 1) { errors.push(`${c.id}: parse must be a regex with exactly one capture group`); continue; }
-    cl.push({ claim: c.id, stage: String(m.stage), parse: String(m.parse), ...(typeof m.scale === "number" && m.scale > 0 ? { scale: m.scale } : {}) });
+    cl.push({ claim: c.id, stage: String(m.stage).replace(/[^\w-]/g, "_"), parse: String(m.parse), ...(typeof m.scale === "number" && m.scale > 0 ? { scale: m.scale } : {}) });
   }
   const seeds = (Array.isArray(r.seeds) ? r.seeds : [0]).filter((x) => Number.isInteger(x)).slice(0, 5);
   if (!seeds.length) seeds.push(0);

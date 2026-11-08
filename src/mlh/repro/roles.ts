@@ -91,7 +91,7 @@ Each claim names the stage whose output contains its number and a regex with exa
         }, required: ["id", "argv", "timeoutS"] } },
         fetch: { type: "array", items: { type: "object", properties: { url: { type: "string" }, to: { type: "string" }, sha256: { type: "string" }, unpack: { type: "string", enum: ["zip", "tar"] } }, required: ["url", "to"] } },
         checks: { type: "array", items: { type: "object", properties: { path: { type: "string" }, minFiles: { type: "integer" } }, required: ["path", "minFiles"] } },
-        claims: { type: "array", items: { type: "object", properties: { claim: { type: "string" }, stage: { type: "string" }, parse: { type: "string" }, scale: { type: "number" } }, required: ["claim", "stage", "parse"] } },
+        claims: { type: "array", items: { type: "object", properties: { claim: { type: "string", description: "the claim's id, exactly as given" }, stage: { type: "string" }, parse: { type: "string" }, scale: { type: "number" } }, required: ["claim", "stage", "parse"] } },
         seeds: { type: "array", items: { type: "integer" } }, seedArg: { type: "string" }, seedEnv: { type: "string" },
       },
       required: ["fidelity", "stages", "claims"],

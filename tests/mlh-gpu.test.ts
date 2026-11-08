@@ -42,6 +42,16 @@ describe("GPU plans", () => {
     expect(v({ ...base, fetch: [{ url: "https://x.org/a", to: "/tmp/a" }] }).errors.join()).toMatch(/under \/cache\/data/);
   });
 
+  it("maps a claim named by its description to its id when exactly one claim's value appears in it", () => {
+    const two = [{ id: "mrpc", metric: "accuracy", value: 0.897 }, { id: "rte", metric: "accuracy", value: 0.866 }];
+    const plan = { fidelity: "full", stages: [{ id: "m", argv: ["python", "run.py"], gpu: "T4", timeoutS: 600 }, { id: "r", argv: ["python", "run.py"], gpu: "T4", timeoutS: 600 }],
+      claims: [{ claim: "RoBERTa-base LoRA MRPC dev accuracy 89.7 +/- 0.7", stage: "m", parse: "acc = ([0-9.]+)" }, { claim: "rte accuracy", stage: "r", parse: "acc = ([0-9.]+)" }] };
+    const r = validateGpuPlan(two, plan, { budgetUsd: 5, price: gpuPrice });
+    expect(r.errors).toEqual(['no stage measures claim rte (set "claim" to exactly one of: "mrpc", "rte")']);
+    const ok = validateGpuPlan(two, { ...plan, claims: [plan.claims[0], { ...plan.claims[1], claim: "rte" }] }, { budgetUsd: 5, price: gpuPrice });
+    expect(ok.plan!.claims.map((c) => c.claim)).toEqual(["mrpc", "rte"]);
+  });
+
   it("assigns the cheapest GPU with enough memory when a stage states its need", () => {
     const r = v({ ...base, stages: [base.stages[0], { ...base.stages[1], gpu: "A100-40GB", gpuMemGB: 12 }] });
     expect(r.plan!.stages[1]!.gpu).toBe("T4");
