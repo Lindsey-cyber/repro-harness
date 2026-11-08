@@ -46,8 +46,7 @@ def run_job(req: dict) -> dict:
     t0 = time.time()
     sb = modal.Sandbox.create(**kwargs)
     try:
-        with sb.open("/tmp/repo.tgz", "wb") as f:
-            f.write(base64.b64decode(req["repo_tgz"]))
+        sb.filesystem.write_bytes(base64.b64decode(req["repo_tgz"]), "/tmp/repo.tgz")
         sb.exec("bash", "-c", "mkdir -p /work && tar -xzf /tmp/repo.tgz -C /work", timeout=600).wait()
         env = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in (req.get("env") or {}).items())
         cmd = " ".join(shlex.quote(a) for a in req["cmd"])
@@ -58,8 +57,7 @@ def run_job(req: dict) -> dict:
         files = {}
         for rel in req.get("outputs") or []:
             try:
-                with sb.open(f"/work/{rel}", "r") as f:
-                    files[rel] = f.read()[-200000:]
+                files[rel] = sb.filesystem.read_text(f"/work/{rel}")[-200000:]
             except Exception:
                 pass
         return {"exit_code": code, "stdout": out[-100000:], "stderr": err[-50000:], "elapsed_s": time.time() - t0, "files": files}
