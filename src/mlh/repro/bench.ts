@@ -217,7 +217,8 @@ export async function runReproBench(o: { modes: Mode[]; tasks?: string[]; out: s
   mkdirSync(o.out, { recursive: true });
   const name = `repro-${o.label ?? "latest"}`;
   const partial = join(o.out, `${name}.jsonl`);
-  const results: Result[] = existsSync(partial) ? readFileSync(partial, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Result) : [];
+  // A line torn by a crash or a full disk is dropped (its run is redone), like the journal's last line.
+  const results: Result[] = existsSync(partial) ? readFileSync(partial, "utf8").split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l) as Result]; } catch { return []; } }) : [];
   const done = new Set(results.map((r) => `${r.task}/${r.mode}`));
   const queue = tasks.flatMap((t, i) => o.modes.map((m) => [t, i, m] as const)).filter(([t, , m]) => !done.has(`${t.id}/${m}`));
   await Promise.all(Array.from({ length: Math.min(o.parallel ?? 3, queue.length) }, async () => {

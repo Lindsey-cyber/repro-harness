@@ -2,9 +2,10 @@
 // the full set of requirement specifiers. Built once in a network-enabled
 // sandbox (install only), then mounted read-only at /opt for every run.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { authorize, type Evidence } from "../core/authz.ts";
+import { runProc } from "../io/proc.ts";
 import { DEFAULT_LIMITS, Sandbox, type Isolation, type SandboxStats } from "../io/sandbox.ts";
 
 const SPEC = /^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?(\s*(===?|>=|<=|~=|!=|<|>)\s*[A-Za-z0-9.*+!_-]+(\s*,\s*(===?|>=|<=|~=|!=|<|>)\s*[A-Za-z0-9.*+!_-]+)*)?$/;
@@ -62,6 +63,12 @@ export function siteManager(root: string, o: { isolation: Isolation; stats: Sand
           if (r.category) { rmSync(site, { recursive: true, force: true }); return { message: `install failed (${r.category}) for ${group.join(" ")}:\n${log.slice(-2500)}`, specs: [] }; }
         }
         writeFileSync(done, JSON.stringify(specs));
+        // Sites differ by a package or two but each carries its own copy of torch (~1 GB): identical files are
+        // hard-linked to the most similar existing site. Without this, 29 sites filled 24 GB.
+        const peers = readdirSync(root).filter((d) => d !== key && existsSync(join(root, d, ".mlh-specs.json")));
+        const overlap = (d: string) => { const o = new Set(specsOf(join(root, d)).map(norm)); return specs.filter((x) => o.has(norm(x))).length; };
+        const best = peers.sort((a, b) => overlap(b) - overlap(a))[0];
+        if (best && overlap(best) > 0) await runProc(["hardlink", "-c", "-q", site, join(root, best)], { cwd: root, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, timeoutMs: 600_000 });
         return { site, message: `installed: ${specs.join(" ")}${log ? `\n${log.slice(-1500)}` : ""}`, specs };
       } finally {
         rmSync(lock, { recursive: true, force: true });
