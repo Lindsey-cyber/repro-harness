@@ -1,8 +1,29 @@
 // Node implementations of the reproduction flow. Agents explore and propose;
 // everything that decides (claim validity, plan validity, run results, claim
 // status, patch risk) is harness code.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+
+// Identity of a source tree for caching: relative paths, sizes and the first 64 KB of every file.
+export function treeHash(root: string): string {
+  const h = createHash("sha256");
+  const buf = Buffer.alloc(65536);
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name === ".git" || e.name === "__pycache__" || e.name === "outputs") continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!e.isFile()) continue;
+      const fd = openSync(p, "r");
+      const n = readSync(fd, buf, 0, buf.length, 0);
+      closeSync(fd);
+      h.update(`${relative(root, p)}\0${statSync(p).size}\0`).update(buf.subarray(0, n));
+    }
+  };
+  walk(root);
+  return h.digest("hex").slice(0, 20);
+}
 import { z } from "zod";
 import { agentLoop } from "../agentloop.ts";
 import { authorize, type Evidence } from "../core/authz.ts";
@@ -164,6 +185,14 @@ const env: Skill = {
   output: any,
   async run(ctx) {
     const remote = need(ctx).gpu ? ` Commands run in a remote Linux container (default image ${DEFAULT_IMAGE_KEY}: Python 3.11, CUDA PyTorch 2.5.1). If the repository needs an older Python/PyTorch, switch the base image with install(image=...) FIRST (${Object.keys(IMAGES).join(", ")}) rather than forcing old packages into a new Python. Packages and image you choose are used by every later stage. Check imports on CPU; use a GPU only for a short probe if needed.` : "";
+    // Environment cache: the same source tree whose environment already passed the harness's smoke test is
+    // reused after the smoke test passes again (minutes instead of a 10–25 minute agent session).
+    const cacheFile = need(ctx).gpu ? join(resolve(".mlh/env-cache"), `${treeHash(need(ctx).versionDir(0))}.json`) : undefined;
+    if (cacheFile && existsSync(cacheFile)) {
+      const hit = JSON.parse(readFileSync(cacheFile, "utf8")) as Record<string, unknown> & { pip: string[]; image: string; launch: unknown };
+      const sm = await smoke(ctx, hit.launch as never, hit.pip, undefined, hit.image);
+      if (sm.ok) return { output: { ...hit, cached: true, smoke: { ok: true, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) } } };
+    }
     const base = { ...loopBase(ctx), ...remoteFor(ctx, []), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}` };
     let r = await agentLoop({ ...base, role: ENV_ROLE });
     // Complex repositories need more than one step budget: an agent that stopped at its limit with the
@@ -180,7 +209,9 @@ const env: Skill = {
       const fix = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: r.steps + ENV_ROLE.maxSteps }, continueWith: `The harness started your launch command (${sm.command}) for ${SMOKE_S} s and it failed: ${sm.why}.\nOutput tail:\n${sm.tail}\nFix the environment (not the code) and report again with a launch command that starts.` });
       if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site, r.image); }
     }
-    return { output: { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps } };
+    const output = { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps };
+    if (cacheFile && sm.ok) { mkdirSync(resolve(".mlh/env-cache"), { recursive: true }); writeFileSync(cacheFile, JSON.stringify(output)); }
+    return { output };
   },
 };
 
