@@ -19,6 +19,21 @@ export function checkSpecs(specs: string[]): Evidence {
   return { kind: "deterministic", check: bad.length ? `package specs rejected: ${bad.join(", ")}` : "package specs are plain requirement specifiers", ok: bad.length === 0 && specs.length > 0 };
 }
 
+// The package a requirement specifier names, normalized (PEP 503): "NumPy>=2" -> "numpy".
+export const packageOf = (spec: string) => spec.trim().split(/[<>=!~\[;\s]/)[0]!.toLowerCase().replace(/[-_.]+/g, "-");
+
+// One specifier per package: a newer specifier for a package replaces the older one, and "-name"
+// removes it. Appending instead let a list hold numpy==1.26.4, numpy==2.1.2 and numpy>=2.1.2 at once,
+// which no image can satisfy.
+export function mergeSpecs(current: string[], changes: string[]): string[] {
+  const out = new Map(current.map((s) => [packageOf(s), s.trim()] as const));
+  for (const c of changes) {
+    if (c.trim().startsWith("-")) out.delete(packageOf(c.trim().slice(1)));
+    else out.set(packageOf(c), c.trim());
+  }
+  return [...out.values()];
+}
+
 const norm = (s: string) => s.trim().replace(/\s+/g, "").toLowerCase();
 const keyOf = (specs: string[]) => createHash("sha256").update([...new Set(specs.map(norm))].sort().join("\n")).digest("hex").slice(0, 16);
 

@@ -8,7 +8,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { authorize, type Evidence } from "./core/authz.ts";
 import type { ChatMsg, ToolDef } from "./io/llm.ts";
 import { DEFAULT_LIMITS, Sandbox, SkillError, type Isolation, type Limits, type SandboxStats } from "./io/sandbox.ts";
-import { checkSpecs } from "./repro/site.ts";
+import { checkSpecs, mergeSpecs } from "./repro/site.ts";
 import type { ChatModel } from "./skills/index.ts";
 
 export type ToolName = "list_files" | "read_file" | "write_file" | "run" | "install" | "read_paper";
@@ -98,7 +98,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   };
   const remoteDefs: Partial<Record<ToolName, ToolDef>> = o.remote ? {
     run: { type: "function", function: { name: "run", description: `Run a shell command in the repository root inside a remote sandbox (Linux, CUDA PyTorch 2.5.1 plus the packages installed so far). Omit gpu for CPU (cheap); gpu one of ${o.remote.gpus.join(", ")} costs money from the paper's budget. Your local edits are uploaded on every call; files the command writes are NOT kept, except under /cache (a persistent volume). Returns exit code and output tails.`, parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer" }, gpu: { type: "string" } }, required: ["command"] } } },
-    install: { type: "function", function: { name: "install", description: "Add pip requirement specifiers to the remote image (e.g. 'transformers==4.30.2'); later runs use them. torch 2.5.1 with CUDA is preinstalled.", parameters: { type: "object", properties: { packages: { type: "array", items: { type: "string" } } }, required: ["packages"] } } },
+    install: { type: "function", function: { name: "install", description: "Set pip requirement specifiers of the remote image (e.g. 'transformers==4.30.2'). A specifier replaces any earlier one for the same package; '-name' removes a package. Later runs use the result; run something after changing it. torch 2.5.1 with CUDA is preinstalled.", parameters: { type: "object", properties: { packages: { type: "array", items: { type: "string" } } }, required: ["packages"] } } },
   } : {};
   const defs: Record<ToolName, ToolDef> = { ...DEFS, ...remoteDefs };
   const tools = [...o.role.tools.map((t) => defs[t]), { type: "function" as const, function: { name: "report", description: o.role.report.description, parameters: o.role.report.parameters } }];
@@ -163,10 +163,10 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
           case "install": {
             if (o.remote) {
               const pk = (Array.isArray(args.packages) ? args.packages : []).map(String);
-              const ev = checkSpecs(pk);
+              const ev = checkSpecs(pk.map((p) => p.replace(/^-/, "")));
               if (!ev.ok) throw new Error(ev.check);
-              state.pip = [...new Set([...(state.pip ?? []), ...pk])];
-              out = `added to the remote image: ${state.pip.join(" ")} (built on the next run)`;
+              state.pip = mergeSpecs(state.pip ?? [], pk);
+              out = `remote image packages now: ${state.pip.join(" ") || "(none)"} (built on the next run; verify with a run)`;
               break;
             }
             if (!o.install) throw new Error("installing is not available");

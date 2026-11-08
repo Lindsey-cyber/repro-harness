@@ -7,7 +7,7 @@ import { authorize } from "../src/mlh/core/authz.ts";
 import { afterFail, afterOk, finalStatus, initialNodes, N, validatePlan } from "../src/mlh/repro/flow.ts";
 import { parseDiff, riskOf } from "../src/mlh/repro/patchrisk.ts";
 import { classifyLog } from "../src/mlh/repro/report.ts";
-import { checkSpecs } from "../src/mlh/repro/site.ts";
+import { checkSpecs, mergeSpecs } from "../src/mlh/repro/site.ts";
 import { numberInText, parseMetric, smokeVerdict, statusOf } from "../src/mlh/repro/skills.ts";
 
 const at = "t";
@@ -62,6 +62,11 @@ describe("reproduction: deciding code", () => {
     const fake = "--- a/train.py\n+++ b/train.py\n@@\n+print('accuracy= 0.815')\n";
     expect(riskOf(parseDiff(fake, "/b", "/w"), [claim]).reasons.join()).toMatch(/adds the claimed value/);
     expect(authorize("apply_eval_patch", [{ kind: "deterministic", check: "x", ok: true }, { kind: "llm", check: "y", ok: true }]).allow).toBe(false);
+  });
+
+  it("keeps one specifier per package: the newest replaces the older, '-name' removes", () => {
+    expect(mergeSpecs(["numpy==1.26.4", "scipy"], ["numpy==2.1.2", "NumPy>=2.1.2", "-scipy", "datasets==2.15.0"])).toEqual(["NumPy>=2.1.2", "datasets==2.15.0"]);
+    expect(mergeSpecs(["scikit_learn==1.5"], ["scikit-learn"])).toEqual(["scikit-learn"]);
   });
 
   it("accepts only plain package specifiers for installation", () => {
