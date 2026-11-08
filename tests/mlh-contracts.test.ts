@@ -59,6 +59,25 @@ describe("remote tool contracts", () => {
   });
 });
 
+describe("harness-implemented tools", () => {
+  it("routes an extra tool (e.g. check_plan) to the harness and returns its verdict to the agent", async () => {
+    const src = tmp(); writeFileSync(join(src, "a"), "");
+    const got: Record<string, unknown>[] = [];
+    let seen = "";
+    const model: ChatModel = { ...scripted([]), async chat(m: ChatMsg[]) {
+      const last = m.at(-1);
+      if (last?.role === "tool") seen = last.content;
+      const call = seen ? { name: "report", args: { done: 1 } } : { name: "check_plan", args: { stages: [] } };
+      return { message: { role: "assistant" as const, content: "", tool_calls: [{ id: "x", type: "function" as const, function: { name: call.name, arguments: JSON.stringify(call.args) } }] }, usage: zeroUsage() };
+    } };
+    const r = await agentLoop({ role: { ...role, tools: [] }, workDir: tmp(), source: src, task: "t", isolation: "namespace", isolationEvidence: { kind: "deterministic", check: "x", ok: true }, model,
+      extraTools: [{ def: { type: "function", function: { name: "check_plan", description: "d", parameters: { type: "object", properties: {} } } }, run: async (a) => { got.push(a); return "REJECTED:\n- plan has no stages"; } }] });
+    expect(got).toEqual([{ stages: [] }]);
+    expect(seen).toMatch(/REJECTED/);
+    expect(r).toMatchObject({ stopped: "report", report: { done: 1 } });
+  });
+});
+
 describe("agent resume", () => {
   it("an agent killed at its last step resumes with one step in which it reports", async () => {
     const src = tmp(); writeFileSync(join(src, "a"), "");
