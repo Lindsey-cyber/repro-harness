@@ -1,0 +1,84 @@
+{
+ "objective": "Reproduce the GLUE dev results of LoRA on RoBERTa-base for MRPC and RTE (Table 2) by fine-tuning with this repository's NLU example.",
+ "source": "/tmp/claude-0/complex/LoRA",
+ "done": true,
+ "claims": [
+  {
+   "id": "roberta_base_lora_mrpc_accuracy",
+   "metric": "accuracy",
+   "value": 0.897,
+   "table": "Table 2",
+   "dataset": "GLUE MRPC dev",
+   "method": "RoBERTa-base (LoRA)",
+   "std": 0.007,
+   "quote": "RoBbase (LoRA)          0.3M 87.5±.3 95.1±.2 89.7±.7 63.4±1.2 93.3±.3 90.8±.1 86.6±.7 91.5±.2    87.2",
+   "status": "not_runnable",
+   "version": 0
+  },
+  {
+   "id": "roberta_base_lora_rte_accuracy",
+   "metric": "accuracy",
+   "value": 0.866,
+   "table": "Table 2",
+   "dataset": "GLUE RTE dev",
+   "method": "RoBERTa-base (LoRA)",
+   "std": 0.007,
+   "quote": "RoBbase (LoRA)          0.3M 87.5±.3 95.1±.2 89.7±.7 63.4±1.2 93.3±.3 90.8±.1 86.6±.7 91.5±.2    87.2",
+   "status": "not_runnable",
+   "version": 0
+  }
+ ],
+ "plan": [],
+ "causes": [
+  {
+   "category": "env.missing_dependency",
+   "tier": "agent",
+   "evidence": "examples/NLU/examples/text-classification/run_glue.py imports `from datasets import load_dataset, load_metric` and `sklearn` (via the GLUE metric script). Base image only had torch 2.5.1, numpy 2.1.2, tqdm, filelock, packaging, requests; no datasets / scikit-learn / pandas / pyarrow / regex / sacrem",
+   "source": "repro.env"
+  },
+  {
+   "category": "env.version_drift",
+   "tier": "agent",
+   "evidence": "Vendored transformers is 4.4.2 (examples/NLU/src/transformers, entry `transformers.__version__ == 4.4.2`) and run_glue.py calls `check_min_version(\"4.4.0\")`. It requires the removed API `datasets.load_metric` (removed in datasets 3.x) and old-style script-based dataset loading `load_dataset(\"glue\", ",
+   "source": "repro.env"
+  },
+  {
+   "category": "env.version_drift",
+   "tier": "agent",
+   "evidence": "examples/NLU/setup.py declares `tokenizers>=0.10.1,<0.11` and src/transformers/dependency_versions_check.py hard-fails at import if an out-of-range tokenizers is installed; no tokenizers<0.11 wheel exists for cp311, so `pip install -e examples/NLU` (documented step `pip install -e .`) cannot succeed",
+   "source": "repro.env"
+  },
+  {
+   "category": "env.path_or_config",
+   "tier": "agent",
+   "evidence": "examples/NLU/roberta_base_mrpc.sh and roberta_base_rte.sh pass `--lora_path ./roberta_base_mnli_lora.bin` but the shipped file is `roberta_base_lora_mnli.bin` (ls: roberta_base_lora_mnli.bin 3568073 bytes; no roberta_base_mnli_lora.bin exists), so MRPC/RTE start-up would fail in `torch.load(model_ar",
+   "source": "repro.env"
+  },
+  {
+   "category": "run.resource_limit",
+   "tier": "agent",
+   "evidence": "Every shipped script hardcodes 8 GPUs (`export num_gpus=8` + `python -m torch.distributed.launch --nproc_per_node=$num_gpus`) while the sandbox is CPU-only / 1 GPU max; scripts as written cannot be launched here. Must run single-process with nproc_per_node=1 (or call run_glue.py directly).",
+   "source": "repro.env"
+  },
+  {
+   "category": "env.missing_dependency",
+   "tier": "agent",
+   "evidence": "Shell scripts also assume a distributed launch module `torch.distributed.launch` under torch 2.5.1 (deprecated; removed in newer torch) — needs verification/replacement by `torchrun` or a plain single-process call.",
+   "source": "repro.env"
+  },
+  {
+   "category": "env.path_or_config",
+   "tier": "agent",
+   "evidence": "Network reachability was confirmed at probe time (urllib GET https://huggingface.co/roberta-base/resolve/main/config.json -> 200), so `roberta-base` weights and the glue/mrpc dataset+metric can be fetched, but nothing is cached in the image; runs must predownload into the persistent volume and set H",
+   "source": "repro.env"
+  }
+ ],
+ "patches": [],
+ "held": [],
+ "failed": [
+  {
+   "id": "repro.plan",
+   "error": "no valid stage plan after 3 attempts\n\nYour previous plan was rejected: no stage measures claim roberta_base_lora_mrpc_accuracy; no stage measures claim roberta_base_lora_rte_accuracy. Fix it."
+  }
+ ]
+}
