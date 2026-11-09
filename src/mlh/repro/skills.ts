@@ -317,7 +317,9 @@ export function metricMatches(parse: string, text: string): { line: string; raw:
     // Other measurement-like numbers on the line (3+ decimals or exponent: losses, scores) are masked too,
     // so an epoch log reads as one series (FT-Transformer: "[test ] score = -0.4567 | rmse = 0.4567").
     // Short label numbers stay (COCO's IoU=0.50:0.95, maxDets=100): they tell metrics apart.
-    const measure = (x: string) => x.replace(/-?\d+\.\d{3,}(?:e[-+]?\d+)?|-?\d+(?:\.\d+)?e[-+]?\d+/gi, "<n>");
+    // Numbers inside [...] are labels (COCO: "@[ IoU=0.50:0.95 | area= all | maxDets=100 ]"); numbers outside
+    // are measurements and are masked ("wf1 = 0.85", "score = -0.498"), whatever their decimals.
+    const measure = (x: string) => { let depth = 0, out = ""; for (const seg of x.split(/([[\]])/)) { if (seg === "[") depth++; else if (seg === "]") depth = Math.max(0, depth - 1); out += depth > 0 || seg === "[" || seg === "]" ? seg : seg.replace(/(?<![\w.])-?\d+(?:\.\d+)?(?:e[-+]?\d+)?(?![\w.])/gi, "<n>"); } return out; };
     const masked = (measure(text.slice(start, cap)) + "<value>" + measure(text.slice(cap + m[1]!.length, end < 0 ? undefined : end))).trim();
     out.push({ line: line.trim(), raw, masked });
   }

@@ -22,6 +22,13 @@ describe("metric extraction", () => {
     expect(parseMetric({ claim: "c", argv: [], seeds: [], parse: p, timeoutS: 0 }, "rmse", FT)).toBe(0.459);
     expect(metricSeries(metricMatches(PARSE, COCO))).toHaveLength(2); // COCO's AP and AR lines stay apart
   });
+  it("FT-Transformer Adult lines (other metrics with 2 or 3 decimals on the line) are one series too", () => {
+    const AD = readFileSync("tests/fixtures/ft-transformer-adult-seed0.txt", "utf8");
+    const p = "\\[test \\] score = [0-9.]+ \\| acc = ([0-9.]+)"; // the planner's, verbatim
+    const series = metricSeries(metricMatches(p, AD));
+    expect(series.map((x) => x.label)).toEqual(["[test ] score = <n> | acc = <value> | mf1 = <n> | ms = <n> | wf1 = <n> | ws = <n> | roc_auc = <n>"]);
+    expect(series[0]!.last).toBe(0.858);
+  });
   it("one metric logged every epoch is a series: the final value counts", () => {
     expect(parseMetric({ claim: "c", argv: [], seeds: [], parse: "val acc: ([0-9.]+)", timeoutS: 0 }, "accuracy", "epoch 1 done\nval acc: 0.61\nepoch 2 done\nval acc: 0.83")).toBe(0.83);
   });
