@@ -24,7 +24,7 @@ export const canaryScript = (): TeamScript => ({
 
 const roleOf = (m: ChatMsg[]): keyof TeamScript | undefined => {
   const s = String(m[0]?.content ?? "");
-  return /^You are the environment engineer/.test(s) ? "env" : /^You are the debugger/.test(s) ? "debug" : /^(Plan from the code|You are the planner)/.test(s) ? "plan" : undefined;
+  return /^You are the environment engineer/.test(s) ? "env" : /^You are the debugger/.test(s) ? "debug" : /Plan from the code|^You are the planner/.test(s) ? "plan" : undefined;
 };
 
 export function scriptedTeam(script: TeamScript, log: string[] = []): Models {
