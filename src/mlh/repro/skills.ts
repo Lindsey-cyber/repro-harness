@@ -469,7 +469,11 @@ const patch: Skill = {
     const spec = gp ? { argv: gp.stages.find((x) => `stage-${x.id}` === claim)?.argv ?? [] } : specsOf(ctx.state).find((x) => x.claim === claim)!;
     const files = parseDiff(d.diff, need(ctx).versionDir(from), d.workspace);
     const argvChange = d.run_argv ? [`${spec.argv.join(" ")} -> ${d.run_argv.join(" ")}`] : [];
-    const { risk, reasons } = riskOf(files, claimsOf(ctx.state), argvChange);
+    const graded = riskOf(files, claimsOf(ctx.state), argvChange);
+    // After a mismatch (the run worked, the number differs), any change could tune the run toward the
+    // paper's number: it needs a human, whatever it touches.
+    const afterMismatch = ctx.state.nodes.get(dbg)?.node.params.why === "mismatch" && (files.length > 0 || argvChange.length > 0);
+    const risk = afterMismatch ? "high" as const : graded.risk, reasons = afterMismatch ? [...graded.reasons, "change proposed after a mismatch: could tune toward the paper's number"] : graded.reasons;
     const hardcode = reasons.some((r) => r.includes("adds the claimed value"));
     const evidence: Evidence[] = [{ kind: "deterministic", check: hardcode ? "patch writes a claimed number into the code" : "static checks: no claimed number written into code", ok: !hardcode }];
     if (ctx.approved) evidence.push({ kind: "human", check: `approval:${ctx.node.id}`, ok: true });
@@ -518,8 +522,9 @@ const stage: Skill = {
     const persist = st.persist.map((path) => ({ from: path, to: `${area(st, seed)}/${path}` }));
     const cmd = st.cwd ? ["bash", "-c", 'cd "$1" && shift && exec "$@"', "bash", st.cwd, ...argv] : argv;
     // Each retry after a timeout gets twice the time (bounded): the same limit again would time out again.
-    const attempt = ctx.state.nodes.get(ctx.node.id)?.attempts ?? 1;
-    const timeoutS = Math.min(st.timeoutS * 2 ** Math.max(0, attempt - 1), MAX_STAGE_S);
+    // Doubling counts the stage's own timeouts, not attempts (a run killed for a code switch is no timeout).
+    const timeouts = (ctx.state.nodes.get(ctx.node.id)?.failures ?? []).filter((f) => f.category === "timeout").length;
+    const timeoutS = Math.min(st.timeoutS * 2 ** timeouts, MAX_STAGE_S);
     const runOn = (gpu: string | undefined) => modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(gpu ? { gpu } : {}) }, g.budget);
     // A GPU type out of capacity: the next cheapest type with enough memory, in the same attempt
     // (LoRA r3: L4 queued 20 min, then "Insufficient capacity").

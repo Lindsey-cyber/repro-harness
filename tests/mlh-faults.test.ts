@@ -401,3 +401,17 @@ describe("P2: a stage that hits its time limit", () => {
     expect(calls.map((c) => c.timeout_s)).toEqual([300, 600]);
   }, 60_000);
 });
+
+describe("P1: a faithful run that misses the paper's number", () => {
+  it("one diagnostic round; any change it proposes is held for a human; the verdict stays not_reproduced", async () => {
+    const ws = workspace();
+    const s = canaryScript();
+    (s.plan[0]!.args as { stages: { argv: string[] }[] }).stages[0]!.argv = ["python3", "train.py", "--steps", "50"]; // prints 0.5, paper says 0.9
+    s.debug = [{ name: "report", args: { causes: [{ category: "run.hyperparameters", evidence: "fewer steps than the paper" }], run_argv: ["python3", "train.py", "--steps", "100"], expected_effect: "matches the paper" } }];
+    await run(ws, s);
+    const j = journal(ws.runDir);
+    expect(j.filter((e) => e.t === "start" && String(e.id).startsWith("repro.debug")).length).toBe(1);
+    expect(j.find((e) => e.t === "hold" && String(e.id).startsWith("repro.patch"))?.reason).toMatch(/after a mismatch/);
+    expect(claims(ws.runDir)[0]![1]).toBe("not_reproduced");
+  }, 60_000);
+});

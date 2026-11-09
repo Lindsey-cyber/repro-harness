@@ -97,7 +97,8 @@ export function afterOk(s: RunState, id: string): TaskNode[] {
   if (id === N.plan) return gpuPlanOf(s) ? stageNodes(s, "") : runNodes(s, specsOf(s).map((x) => x.claim), "");
   if (n.skill === N.compare) {
     const st = (s.nodes.get(id)!.output as { status: Status }).status;
-    return st === "not_reproduced" ? debugNode(s, String(n.params.claim), id, "mismatch") : [];
+    // A faithful run that misses the paper's number is a finding: one diagnostic round, no more.
+    return st === "not_reproduced" && debugRounds(s, String(n.params.claim)) < 1 ? debugNode(s, String(n.params.claim), id, "mismatch") : [];
   }
   if (n.skill === N.debug) {
     const d = s.nodes.get(id)!.output as { hasPatch?: boolean };
