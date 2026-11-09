@@ -154,6 +154,25 @@ describe("declared reporting rule (select over epochs, aggregate over seeds)", a
   });
 });
 
+describe("plan flags that differ from the repository's launch script (LoRA r3)", async () => {
+  const { recipeDeviations, recipeErrors } = await import("../src/mlh/repro/skills.ts");
+  const scripts = ["roberta_base_rte.sh", "roberta_base_mrpc.sh"].map((n) => ({ name: n, text: readFileSync(`tests/fixtures/lora-scripts/${n}`, "utf8") }));
+  const stages = JSON.parse(readFileSync("tests/fixtures/lora-r3-stages.json", "utf8")) as { id: string; argv: string[] }[];
+  it("finds the planner's unreviewed --fp16 and --pad_to_max_length, matched to the right script, and nothing else", () => {
+    const d = recipeDeviations(scripts, stages);
+    const rte = d.filter((x) => x.stage === "train_eval_rte");
+    expect(new Set(rte.map((x) => x.script))).toEqual(new Set(["roberta_base_rte.sh"]));
+    expect(rte.map((x) => x.flag).sort()).toEqual(["--fp16", "--pad_to_max_length"]);
+    expect(d.filter((x) => x.stage === "train_eval_mrpc").every((x) => x.script === "roberta_base_mrpc.sh")).toBe(true);
+  });
+  it("each deviation needs a reason; with reasons the plan passes", () => {
+    expect(recipeErrors(scripts, stages, undefined).join("\n")).toMatch(/train_eval_rte: --fp16 is "" but roberta_base_rte.sh has no such flag/);
+    const reasons = Object.fromEntries(recipeDeviations(scripts, stages).map((x) => [`${x.stage} ${x.flag}`, "fits the 24 GB GPU in the budget"]));
+    expect(recipeErrors(scripts, stages, reasons)).toEqual([]);
+    expect(recipeErrors(scripts, stages, Object.fromEntries(Object.keys(reasons).map((k) => [k, "ok"])))).not.toEqual([]); // a reason, not a token
+  });
+});
+
 describe("effective batch of a multi-GPU recipe on one GPU (LoRA r3)", async () => {
   const { effectiveBatchErrors } = await import("../src/mlh/repro/skills.ts");
   const scripts = ["roberta_base_rte.sh", "roberta_base_mrpc.sh"].map((n) => ({ name: n, text: readFileSync(`tests/fixtures/lora-scripts/${n}`, "utf8") }));

@@ -86,6 +86,46 @@ export function effectiveBatchErrors(scripts: { name: string; text: string }[], 
   }).map((st) => `${st.id}: the repository trains on ${n} GPUs (${multi.map((x) => x.name).slice(0, 3).join(", ")}); keep the effective batch: --gradient_accumulation_steps ${n} on one GPU (or nproc_per_node x accumulation = ${n})`);
 }
 
+// A stage that launches the same entry script as one of the repository's launch scripts must follow it
+// flag by flag, or say why (LoRA r3: the planner added --fp16 and --pad_to_max_length False unreviewed).
+// Paths, seeds and output/logging locations are the harness's business and are not compared; multi-GPU
+// launch flags are effectiveBatchErrors' business. Pure.
+const RECIPE_IGNORE = /^--(output_dir|logging_dir|cache_dir|data_dir|seed|nproc_per_node|lora_path|model_name_or_path|overwrite_output_dir|save_strategy|save_steps|save_total_limit|logging_steps|report_to|gradient_accumulation_steps)$/;
+export function flagsOf(tokens: string[]): Map<string, string> {
+  const m = new Map<string, string>();
+  tokens.forEach((t, i) => {
+    if (!t.startsWith("--") || t === "--") return;
+    const [k, v] = t.includes("=") ? [t.slice(0, t.indexOf("=")), t.slice(t.indexOf("=") + 1)] : [t, tokens[i + 1] && !tokens[i + 1]!.startsWith("--") ? tokens[i + 1]! : ""];
+    m.set(k, v);
+  });
+  return m;
+}
+export function recipeDeviations(scripts: { name: string; text: string }[], stages: { id: string; argv: string[] }[]): { stage: string; script: string; flag: string; script_value: string | null; plan_value: string | null }[] {
+  const out: { stage: string; script: string; flag: string; script_value: string | null; plan_value: string | null }[] = [];
+  for (const st of stages) {
+    const entry = st.argv.find((a) => /\.py$/.test(a))?.split("/").at(-1);
+    if (!entry) continue;
+    const plan = flagsOf(st.argv);
+    // The script that launches the same entry with the most matching flags (e.g. the same --task_name).
+    const cands = scripts.filter((s) => new RegExp(`\\b${entry.replace(".", "\\.")}\\b`).test(s.text)).map((s) => ({ s, f: flagsOf(s.text.replace(/\\\n/g, " ").split(/\s+/).filter(Boolean)) }));
+    const score = (f: Map<string, string>) => [...f].filter(([k, v]) => plan.get(k) === v).length;
+    const best = cands.sort((a, b) => score(b.f) - score(a.f))[0];
+    if (!best || score(best.f) < 3) continue;
+    for (const k of new Set([...best.f.keys(), ...plan.keys()])) {
+      if (RECIPE_IGNORE.test(k)) continue;
+      const a = best.f.has(k) ? best.f.get(k)! : null, b = plan.has(k) ? plan.get(k)! : null;
+      if (a !== b && !(a !== null && b !== null && Number(a) === Number(b) && a !== "" && b !== "")) out.push({ stage: st.id, script: best.s.name, flag: k, script_value: a, plan_value: b });
+    }
+  }
+  return out;
+}
+// Every deviation needs the planner's reason (plan field deviations: {"<stage> <flag>": reason}); the
+// reasons go into the plan output, where a reviewer and a mismatch debugger see them.
+export function recipeErrors(scripts: { name: string; text: string }[], stages: { id: string; argv: string[] }[], reasons: unknown): string[] {
+  const r = (reasons && typeof reasons === "object" ? reasons : {}) as Record<string, unknown>;
+  return recipeDeviations(scripts, stages).filter((d) => !(typeof r[`${d.stage} ${d.flag}`] === "string" && String(r[`${d.stage} ${d.flag}`]).trim().length >= 10)).map((d) => `${d.stage}: ${d.flag} is ${d.plan_value === null ? "missing" : JSON.stringify(d.plan_value)} but ${d.script} has ${d.script_value === null ? "no such flag" : JSON.stringify(d.script_value)}: follow the script, or give the reason in deviations {"${d.stage} ${d.flag}": "<why>"}`);
+}
+
 // Is each declared download reachable from here? A HEAD (or a one-byte GET where HEAD is refused).
 // The error text goes back to the planner, so a wrong scheme, host or path is fixed during planning.
 // MLH_SKIP_URL_PROBE=1 for offline tests whose URLs are served by the fake runner.
@@ -319,7 +359,7 @@ const plan: Skill = {
       let checks = 0;
       const checkPlan = { def: { type: "function" as const, function: { name: "check_plan", description: "Validate a draft plan with the harness's own rules (stage structure, scripts exist, GPU allowlist, declared data, worst-case budget). Takes the same object you would report. Returns OK or the list of problems. Use it before report.", parameters: GPU_PLAN_ROLE.report.parameters } },
         // A budget of checks: FT-Transformer's planner probed the rules with dummy plans (stage "a", parse "x(...)").
-        run: async (draft: Record<string, unknown>) => { if (++checks > CHECK_PLAN_LIMIT) return `REJECTED: the ${CHECK_PLAN_LIMIT}-check budget is used up; call report with your best plan (the harness validates it once more)`; let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } if (v.plan) { const eb = effectiveBatchErrors(repoScripts(src0), v.plan.stages); if (eb.length) v = { errors: eb }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
+        run: async (draft: Record<string, unknown>) => { if (++checks > CHECK_PLAN_LIMIT) return `REJECTED: the ${CHECK_PLAN_LIMIT}-check budget is used up; call report with your best plan (the harness validates it once more)`; let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } if (v.plan) { const eb = [...effectiveBatchErrors(repoScripts(src0), v.plan.stages), ...recipeErrors(repoScripts(src0), v.plan.stages, draft.deviations)]; if (eb.length) v = { errors: eb }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
       for (let attempt = 0; attempt < 3; attempt++) {
         const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), extraTools: [checkPlan], paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip, data: e.data })}\nData the environment declared (already downloaded into /cache/data with provenance; declare the same items in your plan's fetch, they are not downloaded twice): ${JSON.stringify(e.data ?? [])}`,
           // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
@@ -327,8 +367,8 @@ const plan: Skill = {
         let v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) });
         // Every declared download must answer before any GPU time is spent on the plan.
         if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; }
-        if (v.plan) { const eb = effectiveBatchErrors(repoScripts(src0), v.plan.stages); if (eb.length) v = { errors: eb }; }
-        if (v.plan) return { output: { specs: [], errors: [], gpuPlan: v.plan } };
+        if (v.plan) { const eb = [...effectiveBatchErrors(repoScripts(src0), v.plan.stages), ...recipeErrors(repoScripts(src0), v.plan.stages, (r.report as { deviations?: unknown }).deviations)]; if (eb.length) v = { errors: eb }; }
+        if (v.plan) return { output: { specs: [], errors: [], gpuPlan: v.plan, deviations: recipeDeviations(repoScripts(src0), v.plan.stages).map((d) => ({ ...d, reason: String(((r.report as { deviations?: Record<string, unknown> }).deviations ?? {})[`${d.stage} ${d.flag}`] ?? "") })) } };
         feedback = `\n\nYour previous plan was rejected: ${v.errors.join("; ")}. Fix it.`;
       }
       throw new SkillError("contract_violation", `no valid stage plan after 3 attempts${feedback}`);
