@@ -64,6 +64,28 @@ export function currentSite(s: RunState): string | undefined {
 // download while exploring), no credentials inside, GPU time charged to the paper's budget.
 export const CHECK_PLAN_LIMIT = 8;
 
+// The repository's shell launch scripts (for effectiveBatchErrors), at most 200 files of 200 kB.
+function repoScripts(dir: string): { name: string; text: string }[] {
+  const out: { name: string; text: string }[] = [];
+  const walk = (d: string, depth: number) => { if (depth > 4 || out.length >= 200) return; for (const e of readdirSync(d, { withFileTypes: true })) { if (e.name.startsWith(".")) continue; const p = join(d, e.name); if (e.isDirectory()) walk(p, depth + 1); else if (e.name.endsWith(".sh") && statSync(p).size < 200_000) out.push({ name: p.slice(dir.length + 1), text: readFileSync(p, "utf8") }); } };
+  try { walk(dir, 0); } catch { /* unreadable: no check */ }
+  return out;
+}
+
+// The repository's own launch scripts train on N GPUs (num_gpus=N, --nproc_per_node=N): a stage on one GPU
+// with the same per-device batch trains a different model (LoRA r3: RTE effective batch 32 instead of
+// 8 x 32 = 256; 0.821 vs 0.866). It must keep the effective batch with gradient accumulation.
+export function effectiveBatchErrors(scripts: { name: string; text: string }[], stages: { id: string; argv: string[]; gpu?: string }[]): string[] {
+  const multi = scripts.map((x) => ({ name: x.name, n: Number(/\bnum_gpus=(\d+)/.exec(x.text)?.[1] ?? /--nproc_per_node[= ](\d+)/.exec(x.text)?.[1] ?? 1) })).filter((x) => x.n > 1);
+  if (!multi.length) return [];
+  const n = Math.max(...multi.map((x) => x.n));
+  return stages.filter((st) => {
+    const a = st.argv.join(" ");
+    const procs = Number(/--nproc_per_node[= ](\d+)/.exec(a)?.[1] ?? 1), acc = Number(/--gradient_accumulation_steps[= ](\d+)/.exec(a)?.[1] ?? 1);
+    return /--per_device_train_batch_size/.test(a) && procs * acc < n;
+  }).map((st) => `${st.id}: the repository trains on ${n} GPUs (${multi.map((x) => x.name).slice(0, 3).join(", ")}); keep the effective batch: --gradient_accumulation_steps ${n} on one GPU (or nproc_per_node x accumulation = ${n})`);
+}
+
 // Is each declared download reachable from here? A HEAD (or a one-byte GET where HEAD is refused).
 // The error text goes back to the planner, so a wrong scheme, host or path is fixed during planning.
 // MLH_SKIP_URL_PROBE=1 for offline tests whose URLs are served by the fake runner.
@@ -292,7 +314,7 @@ const plan: Skill = {
       let checks = 0;
       const checkPlan = { def: { type: "function" as const, function: { name: "check_plan", description: "Validate a draft plan with the harness's own rules (stage structure, scripts exist, GPU allowlist, declared data, worst-case budget). Takes the same object you would report. Returns OK or the list of problems. Use it before report.", parameters: GPU_PLAN_ROLE.report.parameters } },
         // A budget of checks: FT-Transformer's planner probed the rules with dummy plans (stage "a", parse "x(...)").
-        run: async (draft: Record<string, unknown>) => { if (++checks > CHECK_PLAN_LIMIT) return `REJECTED: the ${CHECK_PLAN_LIMIT}-check budget is used up; call report with your best plan (the harness validates it once more)`; let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
+        run: async (draft: Record<string, unknown>) => { if (++checks > CHECK_PLAN_LIMIT) return `REJECTED: the ${CHECK_PLAN_LIMIT}-check budget is used up; call report with your best plan (the harness validates it once more)`; let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } if (v.plan) { const eb = effectiveBatchErrors(repoScripts(src0), v.plan.stages); if (eb.length) v = { errors: eb }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
       for (let attempt = 0; attempt < 3; attempt++) {
         const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), extraTools: [checkPlan], paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip, data: e.data })}\nData the environment declared (already downloaded into /cache/data with provenance; declare the same items in your plan's fetch, they are not downloaded twice): ${JSON.stringify(e.data ?? [])}`,
           // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
@@ -300,6 +322,7 @@ const plan: Skill = {
         let v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) });
         // Every declared download must answer before any GPU time is spent on the plan.
         if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; }
+        if (v.plan) { const eb = effectiveBatchErrors(repoScripts(src0), v.plan.stages); if (eb.length) v = { errors: eb }; }
         if (v.plan) return { output: { specs: [], errors: [], gpuPlan: v.plan } };
         feedback = `\n\nYour previous plan was rejected: ${v.errors.join("; ")}. Fix it.`;
       }

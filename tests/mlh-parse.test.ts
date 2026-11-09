@@ -153,3 +153,18 @@ describe("declared reporting rule (select over epochs, aggregate over seeds)", a
     expect(v({ aggregate: "mode" }).errors.join()).toMatch(/aggregate must be mean or median/);
   });
 });
+
+describe("effective batch of a multi-GPU recipe on one GPU (LoRA r3)", async () => {
+  const { effectiveBatchErrors } = await import("../src/mlh/repro/skills.ts");
+  const scripts = ["roberta_base_rte.sh", "roberta_base_mrpc.sh"].map((n) => ({ name: n, text: readFileSync(`tests/fixtures/lora-scripts/${n}`, "utf8") }));
+  const stages = JSON.parse(readFileSync("tests/fixtures/lora-r3-stages.json", "utf8")) as { id: string; argv: string[] }[];
+  it("the recorded plan is rejected: 8-GPU recipe, one GPU, no accumulation", () => {
+    const e = effectiveBatchErrors(scripts, stages);
+    expect(e).toHaveLength(2);
+    expect(e[0]).toMatch(/trains on 8 GPUs.*--gradient_accumulation_steps 8/);
+  });
+  it("with --gradient_accumulation_steps 8 it passes; a single-GPU repository is not affected", () => {
+    expect(effectiveBatchErrors(scripts, stages.map((s) => ({ ...s, argv: [...s.argv, "--gradient_accumulation_steps", "8"] })))).toEqual([]);
+    expect(effectiveBatchErrors([{ name: "run.sh", text: "python train.py --per_device_train_batch_size 32" }], stages)).toEqual([]);
+  });
+});
