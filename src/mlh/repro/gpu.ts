@@ -115,6 +115,10 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     const id = String(s.id ?? "").replace(/[^\w-]/g, "_");
     if (!id || seen.has(id)) { errors.push(`stage id ${s.id} missing or duplicated`); continue; }
     if (!Array.isArray(s.argv) || !s.argv.length || !s.argv.every((a) => typeof a === "string")) { errors.push(`${id}: argv must be a non-empty list of strings`); continue; }
+    // Placeholders: only {seed}, and only where there is a seed to put in.
+    const ph = [...new Set(s.argv.flatMap((a) => a.match(/\{[^}]*\}/g) ?? []))];
+    if (ph.some((x) => x !== "{seed}")) { errors.push(`${id}: unknown placeholder ${ph.filter((x) => x !== "{seed}").join(", ")} in argv (only {seed}, in a perSeed stage)`); continue; }
+    if (ph.length && !s.perSeed) { errors.push(`${id}: {seed} in argv needs perSeed: true`); continue; }
     if (INLINE(s.argv)) { errors.push(`${id}: inline programs (python -c, sh -c) are not allowed; run a script of the repository (a fetch script may be added by the debugger as a reviewed change)`); continue; }
     const needs = (Array.isArray(s.needs) ? s.needs : []).map(String);
     const unknown = needs.find((n) => !seen.has(n));

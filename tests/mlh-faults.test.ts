@@ -328,3 +328,19 @@ describe("P1: environment data is declared, downloaded by the harness, and trave
     expect(journal(ws.runDir).find((e) => e.t === "ok" && e.id === "repro.env").output.data).toEqual([]);
   }, 60_000);
 });
+
+describe("P1: {seed} in a per-seed stage's command", () => {
+  it("each instance gets its own seed in place of {seed} (FT-Transformer r2c ran tuned/{seed}.toml literally)", async () => {
+    const ws = workspace();
+    const s = canaryScript();
+    const plan = structuredClone(s.plan[0]!.args) as { seeds: number[]; stages: Record<string, unknown>[] };
+    plan.seeds = [0, 1];
+    plan.stages = [{ id: "train", argv: ["python3", "train.py", "--steps", "100", "--seed", "{seed}"], cwd: "/work", timeoutS: 300, gpu: "T4", perSeed: true }];
+    s.plan = [{ name: "report", args: plan }];
+    await run(ws, s);
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+    const calls = readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => (JSON.parse(l).cmd as string[]).join(" "));
+    expect(calls.filter((c) => /train\.py --steps 100 --seed [01]$/.test(c)).sort()).toEqual(["python3 train.py --steps 100 --seed 0", "python3 train.py --steps 100 --seed 1"]);
+    expect(calls.some((c) => c.includes("{seed}"))).toBe(false);
+  }, 60_000);
+});

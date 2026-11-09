@@ -471,6 +471,9 @@ const stage: Skill = {
     const { argv: overrides } = currentVersion(ctx.state);
     let argv = [...(overrides[`stage-${sid}`] ?? st.argv)];
     const env: Record<string, string> = { ...(st.env ?? {}) };
+    // "{seed}" in a per-seed stage's command is that instance's seed (FT-Transformer r2c: the planner
+    // wrote tuned/{seed}.toml and every instance looked for a file literally named "{seed}.toml").
+    if (seed !== undefined) argv = argv.map((x) => x.replaceAll("{seed}", String(seed)));
     if (seed !== undefined) {
       if (p.seedArg) { const i = argv.indexOf(p.seedArg); if (i >= 0 && i + 1 < argv.length) argv[i + 1] = String(seed); else argv = [...argv, p.seedArg, String(seed)]; }
       if (p.seedEnv) env[p.seedEnv] = String(seed);

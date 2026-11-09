@@ -61,3 +61,14 @@ describe("plan rules from FT-Transformer r2", async () => {
     expect(v({ ...f.plan, stages: keep, fetch: [{ url: f.plan.fetch[0].url, to: "/cache/data/rtdl", unpack: "tar" }] })).toBe("");
   });
 });
+
+describe("argv placeholders", async () => {
+  const { validateGpuPlan } = await import("../src/mlh/repro/gpu.ts");
+  const { gpuPrice } = await import("../src/mlh/backends/modal.ts");
+  const v = (stage: Record<string, unknown>) => validateGpuPlan([{ id: "c", metric: "acc", value: 0.9 }] as never, { fidelity: "full", seeds: [0, 1], stages: [{ id: "s", timeoutS: 300, ...stage }], claims: [{ claim: "c", stage: "s", parse: "acc: ([0-9.]+)" }] }, { budgetUsd: 5, price: gpuPrice }).errors.join();
+  it("{seed} only in perSeed stages; no other placeholder", () => {
+    expect(v({ argv: ["python", "a.py", "cfg/{seed}.toml"], perSeed: true })).toBe("");
+    expect(v({ argv: ["python", "a.py", "cfg/{seed}.toml"] })).toMatch(/needs perSeed/);
+    expect(v({ argv: ["python", "a.py", "{dataset}"], perSeed: true })).toMatch(/unknown placeholder \{dataset\}/);
+  });
+});
