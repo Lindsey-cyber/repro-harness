@@ -6,6 +6,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runProc, startProc } from "../io/proc.ts";
+import { emptyStore, record, renderTrust, roleOutcomes, scaleGate, type TrustStore } from "./trustscore.ts";
 
 export interface Paper { id: string; arxiv: string; repo: string; commit: string; objective: string; budgetUsd?: number }
 
@@ -100,7 +101,15 @@ export function summarize(p: Paper, runDir: string, resumes: number, wallS: numb
   };
 }
 
-function render(rows: Record<string, unknown>[]): string {
+// The hillclimb metric: a run counts as a pipeline success when every claim got a
+// definitive verdict (reproduced or not) and the run was not stopped. Plus median wall time.
+export function pipelineMetric(rows: Record<string, unknown>[]): { success: number; n: number; medianMin: number } {
+  const ok = rows.filter((r) => { const c = (r.claims as { status: string }[]) ?? []; return !r.stopped && c.length > 0 && c.every((x) => x.status === "reproduced" || x.status === "not_reproduced"); }).length;
+  const m = rows.map((r) => Number(r.wallMin)).filter(Number.isFinite).sort((a, b) => a - b);
+  return { success: ok, n: rows.length, medianMin: m.length ? m[Math.floor((m.length - 1) / 2)]! : 0 };
+}
+
+function render(rows: Record<string, unknown>[], extra: string[] = []): string {
   const cell = (r: Record<string, unknown>) => ((r.claims as { id: string; paper: number; status: string; mean?: number }[]) ?? []).map((c) => `${c.status === "reproduced" ? "✔" : c.status === "not_reproduced" ? "≠" : "✘"} ${c.id}: ${c.mean?.toFixed(3) ?? "—"} vs ${c.paper}`).join("<br>") || "—";
   const claims = rows.flatMap((r) => (r.claims as { status: string }[]) ?? []);
   return [
@@ -109,6 +118,8 @@ function render(rows: Record<string, unknown>[]): string {
     "| paper | claims (mean vs paper) | fidelity | env smoke | GPU $ | LLM tokens | min | resumes | failures |", "|---|---|---|---|---|---|---|---|---|",
     ...rows.map((r) => `| ${r.paper} (${r.arxiv}) | ${cell(r)} | ${r.fidelity} | ${r.smoke === null ? "—" : r.smoke ? "pass" : "FAIL"} | ${r.gpuUsd} | ${r.llmTokens} | ${r.wallMin} | ${r.resumes} | ${Object.entries(r.failures as Record<string, number>).map(([k, v]) => `${k}×${v}`).join(", ") || "—"}${r.stopped ? ` STOPPED: ${r.stopped}` : ""} |`),
     "", ...rows.flatMap((r) => ((r.failedNodes as string[]) ?? []).length ? [`- ${r.paper}: ${(r.failedNodes as string[]).join("; ")}`] : []), "",
+    ...(() => { const m = pipelineMetric(rows); return [`Pipeline success (every claim definitive, not stopped): ${m.success}/${m.n}; median ${m.medianMin} min/paper`, ""]; })(),
+    ...extra,
   ].join("\n");
 }
 
@@ -121,8 +132,13 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
   const rows: Record<string, unknown>[] = existsSync(rowsFile) ? readFileSync(rowsFile, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
   const done = new Set(rows.map((r) => r.paper));
   let stop = false;
-  const queue = papers.filter((p) => !done.has(p.id));
-  await Promise.all(Array.from({ length: Math.min(o.parallel, queue.length) }, async () => {
+  // Trust gates scale: while any agent role is unproven, a round stays small and serial.
+  const trustFile = join(o.out, "trust.json");
+  let trust: TrustStore = existsSync(trustFile) ? JSON.parse(readFileSync(trustFile, "utf8")) : emptyStore();
+  const gate = o.mode === "solo" ? { maxPapers: Infinity, parallel: o.parallel, blockedBy: [] } : scaleGate(trust);
+  const queue = papers.filter((p) => !done.has(p.id)).slice(0, gate.maxPapers);
+  const gateNote = gate.blockedBy.length ? `scale gated: roles on probation (${gate.blockedBy.join(", ")}) -> at most ${gate.maxPapers} papers, ${gate.parallel} at a time` : "all roles trusted: full scale";
+  await Promise.all(Array.from({ length: Math.min(o.parallel, gate.parallel, queue.length) }, async () => {
     for (let p = queue.shift(); p && !stop; p = queue.shift()) {
       const runDir = join(base, p.id), log = join(base, `${p.id}.log`);
       const t0 = Date.now();
@@ -149,10 +165,15 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
       }
       rows.push(row);
       appendFileSync(rowsFile, JSON.stringify(row) + "\n");
-      writeFileSync(join(o.out, `${o.label}.md`), render(rows));
+      if (o.mode !== "solo") {
+        trust = record(trust, p.id, new Date().toISOString(), roleOutcomes(events(runDir) as never));
+        writeFileSync(trustFile, JSON.stringify(trust, null, 1));
+        writeFileSync(join(o.out, "trust.md"), renderTrust(trust));
+      }
+      writeFileSync(join(o.out, `${o.label}.md`), render(rows, [gateNote, "", renderTrust(trust)]));
     }
   }));
-  writeFileSync(join(o.out, `${o.label}.md`), render(rows));
+  writeFileSync(join(o.out, `${o.label}.md`), render(rows, [gateNote, "", renderTrust(trust)]));
 }
 
 // One line per paper: finished node kinds, nodes running now, failures, GPU spent, minutes since progress.

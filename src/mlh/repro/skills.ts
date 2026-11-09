@@ -206,11 +206,13 @@ const env: Skill = {
     // Harness-verified: the launch command must actually start. One repair round if it does not.
     const claimed = r.report.runnable === true;
     let sm = await smoke(ctx, r.report.launch as never, r.pip, r.site, r.image);
+    // Audited for the environment agent's trust: did its own report pass, without a repair round?
+    const repaired = !sm.ok;
     if (!sm.ok) {
       const fix = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: r.steps + ENV_ROLE.maxSteps }, continueWith: `The harness started your launch command (${sm.command}) for ${SMOKE_S} s and it failed: ${sm.why}.\nOutput tail:\n${sm.tail}\nFix the environment (not the code) and report again with a launch command that starts.` });
       if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site, r.image); }
     }
-    const output = { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps };
+    const output = { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, repaired, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps };
     if (cacheFile && sm.ok) { mkdirSync(resolve(".mlh/env-cache"), { recursive: true }); writeFileSync(cacheFile, JSON.stringify(output)); }
     return { output };
   },
