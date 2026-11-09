@@ -85,6 +85,7 @@ const DEFS: Record<Exclude<ToolName, never>, ToolDef> = {
 
 const safePath = (root: string, p: string) => { const a = resolve(root, p || "."); if (a !== root && !a.startsWith(root + "/")) throw new Error("path outside the repository"); return a; };
 
+export const writesData = (cmd: string) => /\/cache\/data\b/.test(cmd) && /\b(mkdir|curl|wget|cp|mv|rsync|tar|unzip|gunzip|ln|touch|tee|rm|urlretrieve|urlopen|requests\.get|snapshot_download|hf_hub_download|save_pretrained|open\([^)]*["']w)|>{1,2}\s*\S*\/cache\/data|cd\s+\/cache\/data/.test(cmd);
 export const backgrounds = (cmd: string) => /\b(nohup|setsid|disown)\b|&\s*($|;|\n|\))|\bscreen\s+-d|\btmux\b/.test(cmd.replace(/&&/g, "").replace(/2>&1|>&\d/g, ""));
 
 export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
@@ -173,6 +174,8 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             // view confused an env agent for 12 steps in P5; a container starts in ~2.4 s anyway).
             // A per-command time limit cannot be escaped by backgrounding (P5: an env agent ran DETR's full
             // evaluation with nohup and polled its log, 5 min at a time).
+            // /cache/data holds declared, checksummed downloads only (LoRA r3: the planner curl'ed roberta-base there).
+            if (o.remote && writesData(String(args.command))) { out = "refused: /cache/data holds declared downloads only; declare data as fetch items (the env agent: use fetch_data); write scratch files under /tmp or /cache/runs"; break; }
             if (o.role.maxRunS && backgrounds(String(args.command))) { out = `refused: background processes (nohup, setsid, a trailing &) are not allowed; each command is limited to ${o.role.maxRunS} s and must finish within it`; break; }
             if (o.remote) {
               const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;

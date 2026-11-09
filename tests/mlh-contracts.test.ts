@@ -154,3 +154,11 @@ describe("no escaping the command time limit", async () => {
     for (const c of ["cd /work && python main.py --eval 2>&1 | tail -5", "python a.py > log 2>&1", "ls && echo ok", "cmd >&2"]) expect(backgrounds(c), c).toBe(false);
   });
 });
+
+describe("agents cannot write /cache/data", async () => {
+  const { writesData } = await import("../src/mlh/agentloop.ts");
+  it("refuses downloads and writes into /cache/data (LoRA r3 planner), allows reading it and writing elsewhere", () => {
+    for (const c of ["mkdir -p /cache/data/roberta-base; cd /cache/data/roberta-base; curl -sSL -O https://huggingface.co/roberta-base/resolve/main/config.json", "python - <<'EOF'\nimport urllib.request\nurllib.request.urlretrieve(u, '/cache/data/x')\nEOF", "echo x > /cache/data/f", "cp a /cache/data/b"]) expect(writesData(c), c).toBe(true);
+    for (const c of ["ls /cache/data/coco", "python train.py --data /cache/data/ppi", "curl -sSL -o /tmp/x https://x", "cat /cache/data/x.txt | head"]) expect(writesData(c), c).toBe(false);
+  });
+});
