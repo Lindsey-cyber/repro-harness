@@ -80,6 +80,25 @@ const DEFS: Record<Exclude<ToolName, never>, ToolDef> = {
 
 const safePath = (root: string, p: string) => { const a = resolve(root, p || "."); if (a !== root && !a.startsWith(root + "/")) throw new Error("path outside the repository"); return a; };
 
+// Read-only inspection of the repository (ls, cat, grep, sed -n ...) does not need a remote
+// container: a fresh one per call cost about a minute each, and planners make dozens. Such a
+// command runs in the local sandbox instead, with /work mapped to the repository root. Anything
+// that touches /cache, writes, substitutes commands or runs a program goes remote. Pure.
+const INSPECT = new Set(["ls", "cat", "head", "tail", "grep", "egrep", "find", "wc", "pwd", "echo", "cd", "sed", "sort", "uniq", "tree", "file", "du", "stat", "basename", "dirname", "true", "nl", "cut", "diff"]);
+export function localInspection(command: string): string | undefined {
+  if (/\/cache\b|`|\$\(|<<|\bsudo\b/.test(command)) return undefined;
+  if (/(^|[^2&])>|>>|\btee\b|-i\b|\bsed\b[^|;&]*\bw\b|\bfind\b[^|;&]*-(exec|delete|ok)/.test(command.replace(/2>\s*\/dev\/null|2>&1/g, ""))) return undefined;
+  // Quoted text (grep patterns like "a\|b") is data, not shell structure.
+  const masked = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "Q");
+  if (/[`$]\(|`/.test(masked.replace(/Q/g, ""))) return undefined;
+  const segments = masked.split(/&&|\|\||;|\||\n/).map((x) => x.trim()).filter(Boolean);
+  if (!segments.length || !segments.every((g) => INSPECT.has(g.split(/\s+/)[0]!))) return undefined;
+  // sed only as "sed -n 'N,Mp' file" (GNU sed scripts can write files and run commands).
+  const seds = command.match(/\bsed\b[^|;&\n]*/g) ?? [];
+  if (seds.some((x) => !/^sed\s+-n\s+(['"]?)\d+(,(\d+|\$))?p\1(\s+[\w./-]+)+\s*$/.test(x.trim()))) return undefined;
+  return command.replace(/\/work\//g, "./").replace(/\/work\b/g, ".");
+}
+
 export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   mkdirSync(o.workDir, { recursive: true });
   const statePath = join(o.workDir, "state.json");
@@ -157,7 +176,8 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             break;
           }
           case "run": {
-            if (o.remote) {
+            const local = o.remote && !args.gpu ? localInspection(String(args.command)) : undefined;
+            if (o.remote && !local) {
               const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;
               const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(Number(args.timeout_s) || 600, 3600), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}) });
               out = `exit ${r.category === "timeout" ? "timeout" : r.code}${r.costUsd ? ` (cost $${r.costUsd.toFixed(3)})` : ""}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.slice(-2500)}`;
@@ -165,7 +185,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             }
             const d = authorize(o.isolation === "namespace" ? "exec_sandboxed" : "exec_unsandboxed", [o.isolationEvidence]);
             if (!d.allow) { out = `denied: ${d.reason}`; break; }
-            const r = await sandbox(Number(args.timeout_s) || undefined).run(["sh", "-c", String(args.command)]);
+            const r = await sandbox(Number(args.timeout_s) || undefined).run(["sh", "-c", local ?? String(args.command)]);
             out = `exit ${r.category === "timeout" ? "timeout" : (/^MLH_EXIT=(\d+)$/m.exec(r.stderr)?.[1] ?? r.code)}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.replace(/^MLH_EXIT=\d+\n?/m, "").slice(-2500)}`;
             break;
           }
