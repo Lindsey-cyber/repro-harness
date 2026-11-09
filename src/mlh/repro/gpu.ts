@@ -19,7 +19,10 @@ export const DATA_HOSTS = [
 ];
 // What a stage with network may reach (Modal outbound domain allowlist; wildcards allowed): data and
 // weight hosts and their CDNs. Package indexes and everything else stay blocked.
+// Official dataset hosts of the papers in bench/complex (each download is still checksummed and
+// recorded). Dropbox: FT-Transformer's README links its data there (redirects to dl.dropboxusercontent).
 export const DATA_DOMAINS = [
+  "www.dropbox.com", "dl.dropboxusercontent.com",
   "huggingface.co", "*.huggingface.co", "*.hf.co", "images.cocodataset.org", "dl.fbaipublicfiles.com", "download.pytorch.org",
   "github.com", "*.githubusercontent.com", "zenodo.org", "storage.googleapis.com", "*.s3.amazonaws.com", "s3.amazonaws.com",
   "www.cs.toronto.edu", "people.eecs.berkeley.edu", "data.dgl.ai", "snap.stanford.edu", "ogb.stanford.edu", "nlp.stanford.edu",
