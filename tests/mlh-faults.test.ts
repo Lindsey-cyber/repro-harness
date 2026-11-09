@@ -383,6 +383,27 @@ describe("P1: declared system layers, host memory and data links reach the stage
   }, 60_000);
 });
 
+describe("owner-allowed stage parallelism within one paper", () => {
+  it("independent seed stages run side by side; agents and comparisons still run alone; same result", async () => {
+    const ws = workspace();
+    const s = canaryScript();
+    const pa = s.plan[0]!.args as { seeds: number[]; stages: Record<string, unknown>[] };
+    pa.seeds = [0, 1, 2]; pa.stages[0]!.perSeed = true; pa.stages[0]!.argv = ["python3", "train.py", "--steps", "100", "--seed", "{seed}"];
+    await run({ ...ws, env: { ...ws.env, MLH_STAGE_PARALLEL: "3" } }, s);
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+    const j = journal(ws.runDir);
+    const firstOk = j.findIndex((e) => e.t === "ok" && String(e.id).startsWith("repro.stage"));
+    expect(j.slice(0, firstOk).filter((e) => e.t === "start" && String(e.id).startsWith("repro.stage")).length).toBe(3);
+    // nothing else ever overlapped a running node
+    const open = new Set<string>(); let overlapNonStage = false;
+    for (const e of j) {
+      if (e.t === "start") { if ([...open].some((id) => !id.startsWith("repro.stage")) || (open.size && !String(e.id).startsWith("repro.stage"))) overlapNonStage = true; open.add(e.id); }
+      if (e.t === "ok" || e.t === "fail" || e.t === "hold") open.delete(e.id);
+    }
+    expect(overlapNonStage).toBe(false);
+  }, 60_000);
+});
+
 describe("P2: a GPU type without capacity", () => {
   it("the stage moves to the next cheapest GPU with enough memory in the same attempt, and records it", async () => {
     const ws = workspace([{ when: "^python3 train\\.py --steps 100 --seed", gpu: "L4", nth: [1, 2, 3], error: "RuntimeError: ResourceExhaustedError: Insufficient capacity to create sandbox." }]);

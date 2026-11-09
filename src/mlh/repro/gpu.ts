@@ -283,7 +283,7 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
 // The plan as amended by accepted owner patches (seeds, how a claim's number is read): an amendment is
 // journaled with its human basis like any patch (LoRA r3: the paper reports the median over 5 seeds of
 // each run's best epoch, which the plan had not declared).
-export interface PlanAmend { seeds?: number[]; claims?: { claim: string; select?: "last" | "max" | "min"; aggregate?: "mean" | "median" }[] }
+export interface PlanAmend { seeds?: number[]; claims?: { claim: string; select?: "last" | "max" | "min"; aggregate?: "mean" | "median" }[]; stages?: { id: string; gpu?: string }[] }
 export const gpuPlanOf = (s: RunState): GpuPlan | undefined => {
   const p = (s.nodes.get(N.plan)?.output as { gpuPlan?: GpuPlan } | undefined)?.gpuPlan;
   if (!p) return p;
@@ -292,6 +292,7 @@ export const gpuPlanOf = (s: RunState): GpuPlan | undefined => {
   let q: GpuPlan = { ...p, claims: p.claims.map((c) => ({ ...c })) };
   for (const { plan: a } of amends) {
     if (a!.seeds?.length) q = { ...q, seeds: a!.seeds };
+    for (const st of a!.stages ?? []) q = { ...q, stages: q.stages.map((x) => (x.id === st.id && st.gpu ? { ...x, gpu: st.gpu } : x)) };
     for (const c of a!.claims ?? []) q.claims = q.claims.map((x) => (x.claim === c.claim ? { ...x, ...(c.select ? { select: c.select } : {}), ...(c.aggregate ? { aggregate: c.aggregate } : {}) } : x));
   }
   return q;

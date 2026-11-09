@@ -125,6 +125,10 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   // Reproduction runs are strictly sequential (one node at a time) until reliability is proven
   // (docs/mlh/RELIABILITY.md, P6); other modes keep their default.
   const concurrency = mode === "repro" ? 1 : o.concurrency ?? 3;
+  // Within one paper, independent GPU stages (seeds, tasks) may run side by side when the owner allows it
+  // (MLH_STAGE_PARALLEL); every other node still runs alone. Papers stay one at a time.
+  const stagePar = mode === "repro" ? Math.max(1, Math.min(16, Number(process.env.MLH_STAGE_PARALLEL ?? 1) || 1)) : 0;
+  const isStage = (id: string) => state.nodes.get(id)?.node.skill === "repro.stage";
   let completedHere = 0, retried = 0, attemptsHere = 0, llmTotal = zeroUsage();
   const runMeta = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { arxiv?: string; approvePolicy?: "none" | "medium" | "all"; gpuBudgetUsd?: number };
   // run.json fixes the run's identity (its hash names the volume), so a raise is not written there: the
@@ -281,8 +285,11 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     if (fatal || stop) break; // nothing new starts once the provider is unusable; running nodes finish
     for (const b of blocked(state)) emit({ t: "skip", at: now(), id: b.id, reason: b.reason });
     for (const n of ready(state)) {
-      if (running.size >= concurrency) break;
       if (running.has(n.id)) continue;
+      if (stagePar > 1) {
+        const others = [...running.keys()].some((id) => !isStage(id));
+        if (others || (n.skill !== "repro.stage" ? running.size > 0 : running.size >= stagePar)) continue;
+      } else if (running.size >= concurrency) break;
       running.set(n.id, execute(n).finally(() => running.delete(n.id)));
     }
     if (!running.size) break;

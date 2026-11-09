@@ -95,6 +95,13 @@ async function main(): Promise<void> {
         const { dirname } = await import("node:path");
         const runDir = process.argv[3]!, args = process.argv.slice(4), files: [string, string][] = [];
         while (args[0] === "--file") { const [p, l] = String(args[1]).split("="); if (!p || !l || p.startsWith("/") || p.split("/").includes("..")) throw new Error(`bad --file ${args[1]}`); files.push([p, l]); args.splice(0, 2); }
+        // Optional amendments with the same approval, for every stage and claim of the plan:
+        // --seeds 0,1,2,3,4 --select max --aggregate median --gpu A100-40GB --reset-argv (back to the plan's commands)
+        const take = (k: string) => { const i = args.indexOf(`--${k}`); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
+        const flag0 = (k: string) => { const i = args.indexOf(`--${k}`); if (i < 0) return false; args.splice(i, 1); return true; };
+        const seedsO = take("seeds"), selO = take("select"), aggO = take("aggregate"), gpuO = take("gpu"), resetArgv = flag0("reset-argv");
+        if (selO && !["last", "max", "min"].includes(selO)) throw new Error("--select must be last, max or min");
+        if (aggO && !["mean", "median"].includes(aggO)) throw new Error("--aggregate must be mean or median");
         const why = args.join(" ");
         if (!files.length || why.length < 10) throw new Error("usage: mlh operator-patch <runDir> --file <repo path>=<local file> <reason>");
         const j = `${runDir}/journal.jsonl`;
@@ -107,7 +114,11 @@ async function main(): Promise<void> {
         const k = st.order.filter((x) => x.startsWith("repro.patch")).length + 1, pid = `repro.patch:owner-files:operator${k}`;
         push({ t: "node", at, node: { id: pid, skill: "repro.patch", deps: [], purpose: "setup", params: { claim: "owner-files", from: cur, debug: "" } }, why: "operator" } as never);
         push({ t: "start", at, id: pid, attempt: 1 } as never);
-        push({ t: "ok", at, id: pid, output: { accepted: true, risk: "high", reasons: [why], basis: `human approval: ${why}`, version, files: files.map(([p]) => p) }, findings: [], artifacts: [] } as never);
+        const gp = (await import("./repro/gpu.ts")).gpuPlanOf(st);
+        if ((seedsO || selO || aggO || gpuO || resetArgv) && !gp) throw new Error("plan amendments need an accepted plan");
+        const planAmend = seedsO || selO || aggO || gpuO ? { plan: { ...(seedsO ? { seeds: seedsO.split(",").map(Number).filter((x) => Number.isInteger(x)) } : {}), ...(selO || aggO ? { claims: gp!.claims.map((c) => ({ claim: c.claim, ...(selO ? { select: selO } : {}), ...(aggO ? { aggregate: aggO } : {}) })) } : {}), ...(gpuO ? { stages: gp!.stages.map((s) => ({ id: s.id, gpu: gpuO })) } : {}) } } : {};
+        const argvReset = resetArgv ? { argv: Object.fromEntries(gp!.stages.map((s) => [`stage-${s.id}`, s.argv])) } : {};
+        push({ t: "ok", at, id: pid, output: { accepted: true, risk: "high", reasons: [why], basis: `human approval: ${why}`, version, files: files.map(([p]) => p), ...planAmend, ...argvReset }, findings: [], artifacts: [] } as never);
         if (st.nodes.get("repro.plan")?.status === "succeeded") for (const node of fl.afterOk(st, pid)) if (!st.nodes.has(node.id)) push({ t: "node", at, node, why: `after ${pid}` } as never);
         for (const e of ev) af(j, JSON.stringify(e) + "\n");
         console.log(`version v${version}: ${files.map(([p]) => p).join(", ")}\n${(ev as { t: string; id?: string; node?: { id: string } }[]).map((e) => `${e.t} ${e.id ?? e.node?.id ?? ""}`).join("\n")}`);
