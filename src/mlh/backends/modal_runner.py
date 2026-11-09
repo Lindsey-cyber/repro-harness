@@ -95,7 +95,9 @@ def op_run(req):
         def put(src, dst):
             q, d = shlex.quote(src), shlex.quote(dst)
             return f"rm -rf {d} && mkdir -p $(dirname {d}) && cp -a {q} {d}"
-        pre = " && ".join([put(r["from"], "/work/" + r["to"]) for r in (req.get("restore") or [])]
+        # /cache/runs is where agents and stages write: it exists from the start (SimSiam r3: a planner's
+        # "> /cache/runs/quick.log" failed on a fresh volume).
+        pre = " && ".join((["mkdir -p /cache/runs"] if req.get("cache_volume") else []) + [put(r["from"], "/work/" + r["to"]) for r in (req.get("restore") or [])]
                           + [f"mkdir -p $(dirname {shlex.quote('/work/' + l['path'])}) && ln -sfn {shlex.quote(l['to'])} {shlex.quote('/work/' + l['path'])}" for l in (req.get("links") or [])]) or "true"
         # A declared output that the command did not produce is reported, never skipped silently.
         def keep(src, dst):

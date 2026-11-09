@@ -193,8 +193,10 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             if (o.role.maxRunS && backgrounds(String(args.command))) { out = `refused: background processes (nohup, setsid, a trailing &) are not allowed; each command is limited to ${o.role.maxRunS} s and must finish within it`; break; }
             if (o.remote) {
               const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;
-              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(Number(args.timeout_s) || 600, o.role.maxRunS ?? 3600), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}), ...((state as { system?: string[] }).system?.length ? { system: (state as { system?: string[] }).system } : {}) });
-              out = `exit ${r.category === "timeout" ? "timeout" : r.code}${r.costUsd ? ` (cost $${r.costUsd.toFixed(3)})` : ""}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.slice(-2500)}`;
+              const asked = Number(args.timeout_s) || 600, cap = o.role.maxRunS ?? 3600;
+              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(asked, cap), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}), ...((state as { system?: string[] }).system?.length ? { system: (state as { system?: string[] }).system } : {}) });
+              // Say so when the limit cut the request (SimSiam r3: a planner asked 700 s, got 300, and lost the run's output).
+              out = `exit ${r.category === "timeout" ? `timeout${asked > cap ? ` (you asked ${asked} s; commands are limited to ${cap} s: keep probes shorter and print as you go)` : ""}` : r.code}${r.costUsd ? ` (cost $${r.costUsd.toFixed(3)})` : ""}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.slice(-2500)}`;
               break;
             }
             const d = authorize(o.isolation === "namespace" ? "exec_sandboxed" : "exec_unsandboxed", [o.isolationEvidence]);
