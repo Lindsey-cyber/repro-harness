@@ -114,7 +114,13 @@ async function main(): Promise<void> {
         break;
       }
       if (dd < 0) throw new Error("usage: mlh operator-patch <runDir> <stage> <reason> -- <argv...>");
-      const [runDir, stage, ...why] = process.argv.slice(3, dd), argv = process.argv.slice(dd + 1);
+      const [runDir, stage, ...rest0] = process.argv.slice(3, dd), argv = process.argv.slice(dd + 1);
+      // Optional plan amendment with the same approval: --seeds 0,1,2,3,4 --select max --aggregate median
+      // (select/aggregate apply to the claims this stage measures).
+      const opt = (k: string) => { const i = rest0.indexOf(`--${k}`); if (i < 0) return undefined; const v = rest0[i + 1]; rest0.splice(i, 2); return v; };
+      const seedsOpt = opt("seeds"), selectOpt = opt("select"), aggOpt = opt("aggregate"), why = rest0;
+      if (selectOpt && !["last", "max", "min"].includes(selectOpt)) throw new Error("--select must be last, max or min");
+      if (aggOpt && !["mean", "median"].includes(aggOpt)) throw new Error("--aggregate must be mean or median");
       const j = `${runDir}/journal.jsonl`;
       const st = replay(rf(j, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)), 3);
       const at = new Date().toISOString(), ev: unknown[] = [];
@@ -124,7 +130,10 @@ async function main(): Promise<void> {
       const pid = `repro.patch:stage-${stage}:operator${k}`;
       push({ t: "node", at, node: { id: pid, skill: "repro.patch", deps: [], purpose: "setup", params: { claim: `stage-${stage}`, from: 0, debug: "" } }, why: "operator" } as never);
       push({ t: "start", at, id: pid, attempt: 1 } as never);
-      push({ t: "ok", at, id: pid, output: { accepted: true, risk: "high", reasons: [why.join(" ")], basis: `human approval: ${why.join(" ")}`, argv: { [`stage-${stage}`]: argv } }, findings: [], artifacts: [] } as never);
+      const gpOf = (await import("./repro/gpu.ts")).gpuPlanOf;
+      const stClaims = (gpOf(st)?.claims ?? []).filter((c) => c.stage === stage).map((c) => c.claim);
+      const amend = seedsOpt || selectOpt || aggOpt ? { plan: { ...(seedsOpt ? { seeds: seedsOpt.split(",").map(Number).filter((x) => Number.isInteger(x)) } : {}), ...(selectOpt || aggOpt ? { claims: stClaims.map((claim) => ({ claim, ...(selectOpt ? { select: selectOpt } : {}), ...(aggOpt ? { aggregate: aggOpt } : {}) })) } : {}) } } : {};
+      push({ t: "ok", at, id: pid, output: { accepted: true, risk: "high", reasons: [why.join(" ")], basis: `human approval: ${why.join(" ")}`, argv: { [`stage-${stage}`]: argv }, ...amend }, findings: [], artifacts: [] } as never);
       for (const node of flow.afterOk(st, pid)) if (!st.nodes.has(node.id)) push({ t: "node", at, node, why: `after ${pid}` } as never);
       for (const e of ev) af(j, JSON.stringify(e) + "\n");
       console.log((ev as { t: string; id?: string; node?: { id: string } }[]).map((e) => `${e.t} ${e.id ?? e.node?.id ?? ""}`).join("\n"));

@@ -75,7 +75,12 @@ function repoScripts(dir: string): { name: string; text: string }[] {
 // The repository's own launch scripts train on N GPUs (num_gpus=N, --nproc_per_node=N): a stage on one GPU
 // with the same per-device batch trains a different model (LoRA r3: RTE effective batch 32 instead of
 // 8 x 32 = 256; 0.821 vs 0.866). It must keep the effective batch with gradient accumulation.
-export function effectiveBatchErrors(scripts: { name: string; text: string }[], stages: { id: string; argv: string[]; gpu?: string }[]): string[] {
+// Not a hard rule: the paper's own hyperparameter table wins over the scripts (LoRA r3: Table 9 gives RTE
+// batch 32 while roberta_base_rte.sh launches 8 GPUs). A plan may keep its batch with a stated reason,
+// deviations {"<stage> effective_batch": "<why>"}.
+export function effectiveBatchErrors(scripts: { name: string; text: string }[], stages: { id: string; argv: string[]; gpu?: string }[], reasons?: unknown): string[] {
+  const why = (reasons && typeof reasons === "object" ? reasons : {}) as Record<string, unknown>;
+  stages = stages.filter((st) => !(typeof why[`${st.id} effective_batch`] === "string" && String(why[`${st.id} effective_batch`]).trim().length >= 10));
   const multi = scripts.map((x) => ({ name: x.name, n: Number(/\bnum_gpus=(\d+)/.exec(x.text)?.[1] ?? /--nproc_per_node[= ](\d+)/.exec(x.text)?.[1] ?? 1) })).filter((x) => x.n > 1);
   if (!multi.length) return [];
   const n = Math.max(...multi.map((x) => x.n));
@@ -83,7 +88,7 @@ export function effectiveBatchErrors(scripts: { name: string; text: string }[], 
     const a = st.argv.join(" ");
     const procs = Number(/--nproc_per_node[= ](\d+)/.exec(a)?.[1] ?? 1), acc = Number(/--gradient_accumulation_steps[= ](\d+)/.exec(a)?.[1] ?? 1);
     return /--per_device_train_batch_size/.test(a) && procs * acc < n;
-  }).map((st) => `${st.id}: the repository trains on ${n} GPUs (${multi.map((x) => x.name).slice(0, 3).join(", ")}); keep the effective batch: --gradient_accumulation_steps ${n} on one GPU (or nproc_per_node x accumulation = ${n})`);
+  }).map((st) => `${st.id}: the repository trains on ${n} GPUs (${multi.map((x) => x.name).slice(0, 3).join(", ")}); keep the effective batch (--gradient_accumulation_steps ${n} on one GPU, or nproc_per_node x accumulation = ${n}), or, if the paper states the batch size, follow the paper and say so in deviations {"${st.id} effective_batch": "<the paper's statement>"}`);
 }
 
 // A stage that launches the same entry script as one of the repository's launch scripts must follow it
@@ -368,7 +373,7 @@ const plan: Skill = {
       let checks = 0;
       const checkPlan = { def: { type: "function" as const, function: { name: "check_plan", description: "Validate a draft plan with the harness's own rules (stage structure, scripts exist, GPU allowlist, declared data, worst-case budget). Takes the same object you would report. Returns OK or the list of problems. Use it before report.", parameters: GPU_PLAN_ROLE.report.parameters } },
         // A budget of checks: FT-Transformer's planner probed the rules with dummy plans (stage "a", parse "x(...)").
-        run: async (draft: Record<string, unknown>) => { if (++checks > CHECK_PLAN_LIMIT) return `REJECTED: the ${CHECK_PLAN_LIMIT}-check budget is used up; call report with your best plan (the harness validates it once more)`; let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)), read: (p) => { try { return readFileSync(join(src0, p), "utf8").slice(0, 100_000); } catch { return undefined; } } }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } if (v.plan) { const eb = [...effectiveBatchErrors(repoScripts(src0), v.plan.stages), ...recipeErrors(repoScripts(src0), v.plan.stages, draft.deviations)]; if (eb.length) v = { errors: eb }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
+        run: async (draft: Record<string, unknown>) => { if (++checks > CHECK_PLAN_LIMIT) return `REJECTED: the ${CHECK_PLAN_LIMIT}-check budget is used up; call report with your best plan (the harness validates it once more)`; let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)), read: (p) => { try { return readFileSync(join(src0, p), "utf8").slice(0, 100_000); } catch { return undefined; } } }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } if (v.plan) { const eb = [...effectiveBatchErrors(repoScripts(src0), v.plan.stages, draft.deviations), ...recipeErrors(repoScripts(src0), v.plan.stages, draft.deviations)]; if (eb.length) v = { errors: eb }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
       for (let attempt = 0; attempt < 3; attempt++) {
         const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), extraTools: [checkPlan], paper: paperText(ctx), workDir: ctx.workDir(), source: src0, task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip, data: e.data })}\nData the environment declared (already downloaded into /cache/data with provenance; declare the same items in your plan's fetch, they are not downloaded twice): ${JSON.stringify(e.data ?? [])}`,
           // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
@@ -376,7 +381,7 @@ const plan: Skill = {
         let v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)), read: (p) => { try { return readFileSync(join(src0, p), "utf8").slice(0, 100_000); } catch { return undefined; } } });
         // Every declared download must answer before any GPU time is spent on the plan.
         if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; }
-        if (v.plan) { const eb = [...effectiveBatchErrors(repoScripts(src0), v.plan.stages), ...recipeErrors(repoScripts(src0), v.plan.stages, (r.report as { deviations?: unknown }).deviations)]; if (eb.length) v = { errors: eb }; }
+        if (v.plan) { const eb = [...effectiveBatchErrors(repoScripts(src0), v.plan.stages, (r.report as { deviations?: unknown }).deviations), ...recipeErrors(repoScripts(src0), v.plan.stages, (r.report as { deviations?: unknown }).deviations)]; if (eb.length) v = { errors: eb }; }
         if (v.plan) return { output: { specs: [], errors: [], gpuPlan: v.plan, deviations: recipeDeviations(repoScripts(src0), v.plan.stages).map((d) => ({ ...d, reason: String(((r.report as { deviations?: Record<string, unknown> }).deviations ?? {})[`${d.stage} ${d.flag}`] ?? "") })) } };
         feedback = `\n\nYour previous plan was rejected: ${v.errors.join("; ")}. Fix it.`;
       }

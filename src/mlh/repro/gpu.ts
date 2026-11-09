@@ -280,7 +280,22 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   return { plan: { fidelity, fidelityNote: String(r.fidelityNote ?? ""), fetch, checks, unknownHosts, stages, claims: cl, unmeasured, seeds, ...(typeof r.seedArg === "string" && /^--?[\w-]+$/.test(r.seedArg) ? { seedArg: r.seedArg } : {}), ...(typeof r.seedEnv === "string" && /^[A-Z_][A-Z0-9_]*$/.test(r.seedEnv) ? { seedEnv: r.seedEnv } : {}), worstCaseUsd }, errors: [] };
 }
 
-export const gpuPlanOf = (s: RunState): GpuPlan | undefined => (s.nodes.get(N.plan)?.output as { gpuPlan?: GpuPlan } | undefined)?.gpuPlan;
+// The plan as amended by accepted owner patches (seeds, how a claim's number is read): an amendment is
+// journaled with its human basis like any patch (LoRA r3: the paper reports the median over 5 seeds of
+// each run's best epoch, which the plan had not declared).
+export interface PlanAmend { seeds?: number[]; claims?: { claim: string; select?: "last" | "max" | "min"; aggregate?: "mean" | "median" }[] }
+export const gpuPlanOf = (s: RunState): GpuPlan | undefined => {
+  const p = (s.nodes.get(N.plan)?.output as { gpuPlan?: GpuPlan } | undefined)?.gpuPlan;
+  if (!p) return p;
+  const amends = s.order.filter((id) => id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded").map((id) => s.nodes.get(id)!.output as { accepted?: boolean; plan?: PlanAmend }).filter((o) => o?.accepted && o.plan);
+  if (!amends.length) return p;
+  let q: GpuPlan = { ...p, claims: p.claims.map((c) => ({ ...c })) };
+  for (const { plan: a } of amends) {
+    if (a!.seeds?.length) q = { ...q, seeds: a!.seeds };
+    for (const c of a!.claims ?? []) q.claims = q.claims.map((x) => (x.claim === c.claim ? { ...x, ...(c.select ? { select: c.select } : {}), ...(c.aggregate ? { aggregate: c.aggregate } : {}) } : x));
+  }
+  return q;
+};
 
 export const stageId = (stage: string, version: string, seed?: number) => `repro.stage:${stage}:v${version}${seed !== undefined ? `:s${seed}` : ""}`;
 
