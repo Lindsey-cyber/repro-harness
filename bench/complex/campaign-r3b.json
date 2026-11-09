@@ -1,0 +1,10 @@
+[
+ {
+  "id": "simsiam",
+  "arxiv": "2011.10566",
+  "repo": "https://github.com/PatrickHua/SimSiam",
+  "commit": "75a7c51",
+  "objective": "Reproduce SimSiam's CIFAR-10 result with this repository: linear-evaluation accuracy of ResNet-18 after the full 800-epoch pre-training (paper: 91.8%, Figure D.1). Follow the repository's full CIFAR-10 protocol (configs/simsiam_cifar.yaml), not a shortened one. The ImageNet results are out of scope (8 GPUs for days): list them as unmeasured.",
+  "budgetUsd": 15
+ }
+]
