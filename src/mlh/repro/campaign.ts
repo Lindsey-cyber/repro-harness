@@ -284,11 +284,10 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
       const row = summarize(p, runDir, resumes, (Date.now() - t0) / 1000);
       if (row.stopped && row.stopped !== "provider_fatal") {
         // A strict stop (repeated infrastructure fault, unclassified failure, waste, LLM cap) stops the
-        // round: investigate before anything else is spent. The row is kept; stopped rows are no trust evidence.
+        // round: investigate before anything else is spent. No result row: a relaunch after the fix
+        // resumes the paper from its journal (a row would mark it done; FT-Transformer r2c).
         stop = true;
-        rows.push(row);
-        appendFileSync(rowsFile, JSON.stringify(row) + "\n");
-        writeFileSync(join(o.out, `${o.label}.md`), render(rows, [`ROUND STOPPED at ${p.id}: ${row.stopped}`]));
+        writeFileSync(join(o.out, `${o.label}.md`), render([...rows, row], [`ROUND STOPPED at ${p.id}: ${row.stopped}`]));
         continue;
       }
       if (row.stopped === "provider_fatal") {
