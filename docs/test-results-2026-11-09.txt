@@ -1,0 +1,117 @@
+ ✓ tests/mlh-io.test.ts > journal > tolerates a torn last line from a crash, but not corruption earlier
+ ✓ tests/mlh-io.test.ts > sandbox > blocks network, host writes and home, keeps the copy writable
+ ✓ tests/mlh-llm.test.ts > LLM protocol > a model's approval never authorizes sending code to a provider; the human's --llm approval does
+ ✓ tests/mlh-e2e.test.ts > ml harness end to end > confirms a target leak with held-out evidence and writes an evidence-backed report
+ ✓ tests/mlh-llm.test.ts > LLM protocol > confirms a model hypothesis only when its executed check supports it and a different model judges it valid
+ ✓ tests/mlh-io.test.ts > sandbox > classifies a runaway experiment as a timeout and kills it
+ ✓ tests/mlh-io.test.ts > sandbox > reports a failing command's real exit status, so it is not mistaken for a sandbox fault
+ ✓ tests/mlh-llm.test.ts > LLM protocol > plans no model skill unless models are given
+ ✓ tests/mlh-llm.test.ts > LLM protocol > keeps only manifest fields that pass deterministic checks
+ ✓ tests/mlh-llm.test.ts > LLM protocol > meters each node's model usage separately
+ ✓ tests/mlh-e2e.test.ts > ml harness end to end > refutes a train/test gap that held-out data shows is overfitting, not a broken pipeline
+ ✓ tests/mlh-skills.test.ts > manifest inference > prefers the README's documented command and leaves an ambiguous claim unset rather than guessing
+ ✓ tests/mlh-skills.test.ts > manifest inference > never reads a seed or another integer as the claimed number
+ ✓ tests/mlh-skills.test.ts > data audit > finds the same entity on both sides of a split even when no row repeats, and handles string columns
+ ✓ tests/mlh-skills.test.ts > outputs resolved by observation > uses the metrics file the run actually wrote when the declared one does not exist
+ ✓ tests/mlh-io.test.ts > sandbox > classifies a CPU-limit kill as resource_limit
+ ✓ tests/mlh-contracts.test.ts > remote tool contracts > install switches the base image and keeps one spec per package; every later run receives them
+ ✓ tests/mlh-contracts.test.ts > remote tool contracts > refuses package specs that are not plain requirement specifiers
+ ✓ tests/mlh-contracts.test.ts > harness-implemented tools > routes an extra tool (e.g. check_plan) to the harness and returns its verdict to the agent
+ ✓ tests/mlh-contracts.test.ts > agent resume > an agent killed at its last step resumes with one step in which it reports
+ ✓ tests/mlh-contracts.test.ts > campaign summary > summarizes a run directory: claim statuses, GPU and LLM cost, failure categories, fatal stop
+ ✓ tests/mlh-contracts.test.ts > campaign watchdog > allows 2 h of silence normally (agents write no journal events), and a running stage's full modal wait while it runs
+ ✓ tests/mlh-contracts.test.ts > campaign watchdog > counts an agent's checkpoint writes as progress, not only the journal
+ ✓ tests/mlh-contracts.test.ts > time limits > a run command is capped at the role's maxRunS; past wallMin the agent must report, and timings are logged
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > judges the environment by the harness's smoke test, not by the agent's word
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > validates the planner's output and enforces at least three seeds
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > applies the fixed status rule: tolerance max(0.01, 2·paper std, 2·standard error)
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > parses the last metric match and normalizes percentages
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > keeps a claimed number only if it appears in the paper text
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > grades changes to measurement code, and writing the claimed number, as high risk
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > keeps one specifier per package: the newest replaces the older, '-name' removes
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > accepts only plain package specifiers for installation
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > classifies run failures from their logs
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > grows the DAG from results: claims+env → plan → runs per seed → compare → debug on mismatch → patch
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > measures again after a command-only change (no new source version)
+ ✓ tests/mlh-repro.test.ts > reproduction: deciding code > debugs a run that keeps failing, at most twice per claim, then reports the claim not runnable
+ ✓ tests/mlh-retro.test.ts > round retro > ranks failures, compares with the previous round and names the next fix
+ ✓ tests/mlh-retro.test.ts > round retro > stops only after two consecutive rounds meet every bar
+ ✓ tests/mlh-retro.test.ts > round retro > modal ledger sums every run's spend and survives a torn budget file
+ ✓ tests/mlh-retro.test.ts > round retro > trust is rebuilt from journals in time order; stopped and solo rows are no evidence
+ ✓ tests/mlh-structure.test.ts > ml harness structure > keeps decisions pure: core never touches disk, processes, network, io or skills
+ ✓ tests/mlh-structure.test.ts > ml harness structure > keeps the reproduction flow's deciding code pure
+ ✓ tests/mlh-structure.test.ts > ml harness structure > authorizes a proposed change before it becomes a source version, and installs only through authorization
+ ✓ tests/mlh-structure.test.ts > ml harness structure > starts processes in exactly one module
+ ✓ tests/mlh-structure.test.ts > ml harness structure > authorizes every node's actions before its skill runs
+ ✓ tests/mlh-structure.test.ts > ml harness structure > keeps the benchmark's ground truth out of the harness
+ ✓ tests/mlh-gpu.test.ts > GPU plans > accepts a fetch → evaluate plan within budget and computes its worst case
+ ✓ tests/mlh-gpu.test.ts > GPU plans > rejects plans over budget, unknown GPUs, networked GPU stages, forward references and inline programs
+ ✓ tests/mlh-gpu.test.ts > GPU plans > requires every /cache path to come from a declared fetch item, and records unknown data hosts
+ ✓ tests/mlh-gpu.test.ts > GPU plans > maps a claim named by its description to its id when exactly one claim's value appears in it
+ ✓ tests/mlh-gpu.test.ts > GPU plans > reads container paths under /work as repository paths (the SimCSE planner wrote cwd /work/SentEval/data/downstream)
+ ✓ tests/mlh-gpu.test.ts > GPU plans > assigns the cheapest GPU with enough memory when a stage states its need
+ ✓ tests/mlh-gpu.test.ts > GPU plans > refuses a run whose worst case exceeds what is left of the budget
+ ✓ tests/mlh-gpu.test.ts > GPU plans > turns stages into nodes: per-seed stages fan out, the comparison waits for every seed
+ ✓ tests/mlh-replay.test.ts > recorded planner drafts (campaign c1) > no traversal and no whole-volume refs, even next to a valid fetch
+ ✓ tests/mlh-replay.test.ts > recorded planner drafts (campaign c1) > detr: http and off-/cache/data fetches rejected; the corrected plan passes
+ ✓ tests/mlh-replay.test.ts > recorded planner drafts (campaign c1) > simcse: inline python rejected; a model directory filled by fetch items passes
+ ✓ tests/mlh-replay.test.ts > recorded planner drafts (campaign c1) > graphsaint: output dir outside /cache/runs and an invented script are rejected with actionable messages
+ ✓ tests/mlh-core.test.ts > task DAG > rejects unknown dependencies, so the graph stays acyclic by construction
+ ✓ tests/mlh-core.test.ts > task DAG > runs a node only after its dependencies succeed, and skips it when one fails for good
+ ✓ tests/mlh-core.test.ts > task DAG > retries only retryable failures, within the attempt budget
+ ✓ tests/mlh-core.test.ts > task DAG > re-queues a node that was running when the process died
+ ✓ tests/mlh-core.test.ts > task DAG > confirms a suspicion only on independent support, and marks conflicting evidence disputed
+ ✓ tests/mlh-core.test.ts > task DAG > held nodes resume only after a human approval event
+ ✓ tests/mlh-core.test.ts > authorization > allows medium-risk sandboxed execution only on a passing deterministic check
+ ✓ tests/mlh-core.test.ts > authorization > never lets a model's approval authorize a high-risk action
+ ✓ tests/mlh-core.test.ts > authorization > refuses denied actions even with a human approval
+ ✓ tests/mlh-core.test.ts > trust > demotes on one bad audit and promotes only after a streak plus a human
+ ✓ tests/mlh-core.test.ts > planner > plans only skills the manifest supports and records the rest as coverage gaps
+ ✓ tests/mlh-core.test.ts > planner > follows the objective: a pure reproduction objective skips the data audit
+ ✓ tests/mlh-core.test.ts > planner > adds a designated confirmer for a suspicion, else replicates the detector on a fresh run
+ ✓ tests/mlh-core.test.ts > planner > every skill is versioned, has an output contract and a known purpose
+ ✓ tests/mlh-errors.test.ts > Modal error corpus > provider_fatal: recorded c1 lora/ft_transformer
+ ✓ tests/mlh-errors.test.ts > Modal error corpus > provider_transient: recorded c1 lora debug
+ ✓ tests/mlh-errors.test.ts > Modal error corpus > experiment_error: pip pins that do not resolve
+ ✓ tests/mlh-errors.test.ts > Modal error corpus > precondition: bad Modal token
+ ✓ tests/mlh-errors.test.ts > Modal error corpus > timeout: stage exceeded timeoutS
+ ✓ tests/mlh-errors.test.ts > Modal error corpus > sandbox_transient: transport
+ ✓ tests/mlh-errors.test.ts > Modal error corpus > only a spend limit stops the campaign; a capacity shortage is retried
+ ✓ tests/mlh-trust.test.ts > trust scores > wilson lower bound is conservative on small samples
+ ✓ tests/mlh-trust.test.ts > trust scores > reads each role's outcome from harness facts
+ ✓ tests/mlh-trust.test.ts > trust scores > does not credit or blame roles without new evidence
+ ✓ tests/mlh-trust.test.ts > trust scores > infrastructure failures are not blamed on the agent
+ ✓ tests/mlh-trust.test.ts > trust scores > a debugger whose change fixes nothing fails
+ ✓ tests/mlh-trust.test.ts > trust scores > a patch held or refused by the risk policy is no evidence about the debugger
+ ✓ tests/mlh-trust.test.ts > trust scores > promotes only at the standard, demotes on one failure, and gates scale
+ ✓ tests/mlh-trust.test.ts > trust scores > a debugger that was never needed does not block scale; once needed it must earn trust
+ ✓ tests/mlh-trust.test.ts > trust scores > pipeline metric counts only fully definitive, unstopped runs
+ ✓ tests/mlh-trust.test.ts > container cost > bills CPU containers and adds CPU to GPU containers
+ ✓ tests/mlh-e2e.test.ts > ml harness end to end > resumes after being killed mid-run without re-executing completed nodes
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > local: sed -n 500,600p examples/NLU/examples/text-classification/run_glue.py
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > local: cd /work && ls output/x/ 2>/dev/null
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > local: grep -rln "all_results.json\|mean" examples | head
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > local: pwd; ls -la; echo ---; ls examples 2>/dev/null | head
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: python -c 'import torch'
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: ls /cache/hf
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: cat a > b
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: echo x >> f
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: sed -i s/a/b/ f
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: sed s/a/b/ f
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: find . -exec rm {} ;
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: find . -delete
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: ls $(cat x)
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: ls `whoami`
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: cat f | tee g
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: ls; bash run.sh
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: awk 'BEGIN{system("id")}'
+ ✓ tests/mlh-local.test.ts > read-only inspection runs locally, everything else remote > remote: cat <<EOF
+ ✓ tests/mlh-doctor.test.ts > doctor > every offered image has a label the probe can check
+ ✓ tests/mlh-doctor.test.ts > doctor > flags a label that disagrees with the image (the c1 case)
+ ✓ tests/mlh-doctor.test.ts > doctor > old labels still resolve but are not offered
+ ✓ tests/mlh-doctor.test.ts > image for the repository's torch pin > maps a pin to the image with that torch (SimSiam: torch==1.7.0)
+ ✓ tests/mlh-reopen.test.ts > reopen after platform failures > reruns the stages, skips debuggers called for platform faults, brings back the comparisons
+ ✓ tests/mlh-reopen.test.ts > reopen after platform failures > leaves work failures alone
+ ✓ tests/mlh-e2e.test.ts > ml harness end to end > holds repository code when isolation is not proven, and runs it only after a human approves
+ Test Files  16 passed (16)
+      Tests  115 passed (115)
