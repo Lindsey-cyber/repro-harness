@@ -122,7 +122,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const trust = loadTrust(o.trustFile);
   const stats: SandboxStats = { runs: 0, ms: 0 };
   const limits = o.limits ?? DEFAULT_LIMITS;
-  const concurrency = o.concurrency ?? 3;
+  // Reproduction runs are strictly sequential (one node at a time) until reliability is proven
+  // (docs/mlh/RELIABILITY.md, P6); other modes keep their default.
+  const concurrency = mode === "repro" ? 1 : o.concurrency ?? 3;
   let completedHere = 0, retried = 0, attemptsHere = 0, llmTotal = zeroUsage();
   const runMeta = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { arxiv?: string; approvePolicy?: "none" | "medium" | "all"; gpuBudgetUsd?: number };
   const gpuBudget = runMeta.gpuBudgetUsd ?? o.gpuBudgetUsd;

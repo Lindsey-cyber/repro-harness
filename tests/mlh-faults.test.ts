@@ -149,3 +149,17 @@ describe("P2: torn files", () => {
     expect(claims(ws.runDir)).toEqual(CLEAN);
   }, 60_000);
 });
+
+describe("P1: strictly sequential", () => {
+  it("the journal never has two nodes in flight at once, even when the caller asks for concurrency", async () => {
+    const ws = workspace();
+    await withEnv(ws.env, () => runHarness({ runDir: ws.runDir, mode: "repro", llm: scriptedTeam(canaryScript()), concurrency: 3, source: CANARY_REPO, objective: "Reproduce the canary accuracy.", arxiv: "2101.00001", gpuBudgetUsd: 1 }));
+    let inFlight = 0, most = 0;
+    for (const e of journal(ws.runDir)) {
+      if (e.t === "start") most = Math.max(most, ++inFlight);
+      if (e.t === "ok" || e.t === "fail" || e.t === "hold") inFlight--;
+    }
+    expect(most).toBe(1);
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+  }, 60_000);
+});

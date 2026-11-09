@@ -218,6 +218,8 @@ export function retroRound(label: string, out: string, solo = label.includes("so
   return true;
 }
 
+export const sequentialWorkers = (requested: number, gated: number, queued: number) => Math.min(1, requested, gated, queued);
+
 export async function runCampaign(o: { config: string; label: string; parallel: number; out: string; mode?: "team" | "solo" }): Promise<void> {
   const papers = JSON.parse(readFileSync(o.config, "utf8")) as Paper[];
   const base = join(ROOT, ".mlh", "campaign", o.label);
@@ -242,7 +244,10 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
   const seen = (id: string) => Object.values(trust).reduce((a, t) => a + t.history.filter((h) => h.paper.endsWith(`/${id}`) || h.paper === id).length, 0);
   const queue = papers.filter((p) => !done.has(p.id)).map((p, i) => ({ p, i, n: o.mode === "solo" ? 0 : seen(p.id) })).sort((a, b) => a.n - b.n || a.i - b.i).map((x) => x.p).slice(0, gate.maxPapers);
   const gateNote = gate.blockedBy.length ? `scale gated: roles on probation (${gate.blockedBy.join(", ")}) -> at most ${gate.maxPapers} papers, ${gate.parallel} at a time` : "all roles trusted: full scale";
-  await Promise.all(Array.from({ length: Math.min(o.parallel, gate.parallel, queue.length) }, async () => {
+  // Strictly sequential until reliability is proven (docs/mlh/RELIABILITY.md, P6): one paper at a
+  // time, whatever --parallel or the trust gate would allow.
+  const workers = sequentialWorkers(o.parallel, gate.parallel, queue.length);
+  await Promise.all(Array.from({ length: workers }, async () => {
     for (let p = queue.shift(); p && !stop; p = queue.shift()) {
       const bal = o.mode === "solo" ? undefined : await llmBalance(), min = numEnv("MLH_MIN_LLM_BALANCE", 3);
       if (bal !== undefined && bal < min) { stop = true; appendFileSync(join(o.out, `${o.label}.preflight.log`), `${new Date().toISOString()} stopped before ${p.id}: LLM balance ${bal} < ${min}\n`); break; }
