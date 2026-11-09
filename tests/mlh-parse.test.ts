@@ -13,6 +13,15 @@ describe("metric extraction", () => {
     expect(metricMatches(PARSE, COCO).map((m) => m.raw)).toEqual([0.42, 0.574]);
     expect(parseMetric({ claim: "c", argv: [], seeds: [], parse: PARSE, timeoutS: 0 }, "box AP", COCO)).toBeUndefined();
   });
+  it("FT-Transformer's per-epoch test lines (other numbers on the line differ) are one series: the final value", () => {
+    const FT = readFileSync("tests/fixtures/ft-transformer-ca-seed0.txt", "utf8");
+    const p = "\\[test \\] score = -?[0-9.]+ \\| rmse = ([0-9.]+)"; // the planner's, verbatim
+    const series = metricSeries(metricMatches(p, FT));
+    expect(series).toHaveLength(1);
+    expect(series[0]!.label).toBe("[test ] score = <n> | rmse = <value>");
+    expect(parseMetric({ claim: "c", argv: [], seeds: [], parse: p, timeoutS: 0 }, "rmse", FT)).toBe(0.459);
+    expect(metricSeries(metricMatches(PARSE, COCO))).toHaveLength(2); // COCO's AP and AR lines stay apart
+  });
   it("one metric logged every epoch is a series: the final value counts", () => {
     expect(parseMetric({ claim: "c", argv: [], seeds: [], parse: "val acc: ([0-9.]+)", timeoutS: 0 }, "accuracy", "epoch 1 done\nval acc: 0.61\nepoch 2 done\nval acc: 0.83")).toBe(0.83);
   });

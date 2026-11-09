@@ -307,13 +307,18 @@ function seeded(spec: RunSpec, seed: number, argvOverride?: string[]): { argv: s
 // Every line the claim's regex matches, with the captured number. Pure.
 export function metricMatches(parse: string, text: string): { line: string; raw: number; masked: string }[] {
   const out: { line: string; raw: number; masked: string }[] = [];
-  for (const m of text.matchAll(new RegExp(parse, "g"))) {
+  // "d": the capture group's own position (searching for its text found "0.48" inside "-0.480" first).
+  for (const m of text.matchAll(new RegExp(parse, "gd"))) {
     const raw = Number(m[1]);
     if (!Number.isFinite(raw)) continue;
     const at = m.index ?? 0, start = text.lastIndexOf("\n", at) + 1, end = text.indexOf("\n", at + m[0].length);
     // The captured text itself, at its own position, is what gets masked (not String(raw): "0.9000" is 0.9).
-    const cap = at + m[0].indexOf(m[1]!), line = text.slice(start, end < 0 ? undefined : end);
-    const masked = (text.slice(start, cap) + "<value>" + text.slice(cap + m[1]!.length, end < 0 ? undefined : end)).trim();
+    const cap = (m as RegExpMatchArray & { indices?: [number, number][] }).indices?.[1]?.[0] ?? at + m[0].indexOf(m[1]!), line = text.slice(start, end < 0 ? undefined : end);
+    // Other measurement-like numbers on the line (3+ decimals or exponent: losses, scores) are masked too,
+    // so an epoch log reads as one series (FT-Transformer: "[test ] score = -0.4567 | rmse = 0.4567").
+    // Short label numbers stay (COCO's IoU=0.50:0.95, maxDets=100): they tell metrics apart.
+    const measure = (x: string) => x.replace(/-?\d+\.\d{3,}(?:e[-+]?\d+)?|-?\d+(?:\.\d+)?e[-+]?\d+/gi, "<n>");
+    const masked = (measure(text.slice(start, cap)) + "<value>" + measure(text.slice(cap + m[1]!.length, end < 0 ? undefined : end))).trim();
     out.push({ line: line.trim(), raw, masked });
   }
   return out;
@@ -497,7 +502,9 @@ const stage: Skill = {
       const claim = claimsOf(ctx.state).find((x) => x.id === c.claim)!;
       const series = metricSeries(metricMatches(c.parse, text));
       if (series.length > 1) {
-        const d = await disambiguate(ctx.llm?.reviewer, claim, c.parse, series);
+        // The training already ran: a model hiccup here is retried, never answered by re-running the stage.
+        let d = await disambiguate(ctx.llm?.reviewer, claim, c.parse, series).catch((e) => ({ why: `model error: ${String(e).slice(0, 120)}`, options: series.map((x) => x.label) }) as Awaited<ReturnType<typeof disambiguate>>);
+        for (let k = 0; k < 2 && d.index === undefined && /^model error/.test(d.why); k++) d = await disambiguate(ctx.llm?.proposer, claim, c.parse, series).catch((e) => ({ why: `model error: ${String(e).slice(0, 120)}`, options: d.options }));
         disambiguated[c.claim] = d;
         if (d.index === undefined) throw new SkillError("contract_violation", `ambiguous metric for ${c.claim}: the pattern matched ${series.length} differently labelled lines and none could be chosen by label (${d.why}); lines: ${d.options.join(" || ")}`);
         values[c.claim] = toFraction(series[d.index]!.last, c, claim.metric);
