@@ -111,6 +111,16 @@ async function main(): Promise<void> {
       console.log(ev.map((e) => `${e.t} ${"id" in e ? e.id : ""}`).join("\n") || "nothing to reopen");
       break;
     }
+    case "excuse": {
+      // mlh excuse <runDir> <node> <reason>: journaled operator ruling that the node's outcome came from a
+      // harness defect (name the fix), so it is no evidence about the agent's trust. Changes no result.
+      const [runDir, id, ...why] = positional;
+      const j = new Journal(join(runDir!, "journal.jsonl"));
+      if (!replay(j.read()).nodes.has(id!) || !why.length) throw new Error("usage: mlh excuse <runDir> <node> <reason naming the harness fix>");
+      j.append({ t: "excuse", at: new Date().toISOString(), id: id!, reason: why.join(" ") });
+      console.log(`excused ${id}`);
+      break;
+    }
     case "campaign-retro": {
       // Idempotent: the chain calls it for every finished round, whatever code version ran that round.
       const { retroRound } = await import("./repro/campaign.ts");

@@ -28,6 +28,8 @@ export type RunEvent =
   | { t: "approve"; at: string; id: string; by: string }
   | { t: "skip"; at: string; id: string; reason: string }
   | { t: "reopen"; at: string; id: string; reason: string }
+  // An operator's ruling that a node's outcome was caused by a harness defect: not evidence about its agent.
+  | { t: "excuse"; at: string; id: string; reason: string }
   | { t: "gap"; at: string; skill: string; reason: string }
   | { t: "done"; at: string };
 
@@ -39,6 +41,7 @@ export interface NodeState {
   output?: unknown;
   artifacts: ArtifactRef[];
   reason?: string;
+  excused?: string;
   approved: boolean;
 }
 
@@ -135,6 +138,9 @@ export function apply(s: RunState, e: RunEvent): RunState {
       ns.status = "pending"; ns.attempts = 0; ns.reason = e.reason;
       break;
     }
+    case "excuse":
+      need(s, e.id).excused = e.reason;
+      break;
     case "skip":
       need(s, e.id).status = "skipped"; need(s, e.id).reason = e.reason;
       break;

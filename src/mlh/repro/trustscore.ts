@@ -30,7 +30,10 @@ export function wilsonLower(ok: number, n: number, z = 1.96): number {
 type Ev = RunEvent & { id?: string; output?: Record<string, unknown> };
 
 // Harness facts per role, read from a run's journal.
-export function roleOutcomes(events: Ev[]): Record<Role, Outcome> {
+export function roleOutcomes(all: Ev[]): Record<Role, Outcome> {
+  // A node an operator excused (its outcome came from a harness defect, journaled with the reason) gives no evidence.
+  const excused = new Set(all.filter((e) => e.t === "excuse").map((e) => e.id));
+  const events = all.filter((e) => !(e.id && excused.has(e.id)));
   const ok = (id: string) => events.find((e) => e.t === "ok" && e.id === id) as (Ev & { output: Record<string, unknown> }) | undefined;
   // Infrastructure failures (provider, sandbox transport, spend limits) are evidence about the platform, not the agent.
   const fails = (prefix: string) => (events.filter((e) => e.t === "fail" && (e.id ?? "").startsWith(prefix)) as (Ev & { category: string; message: string })[]).filter((f) => failureClass(f.category, f.id ?? "", f.message) === "agent");

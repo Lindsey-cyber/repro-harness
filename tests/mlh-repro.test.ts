@@ -20,6 +20,14 @@ describe("reproduction: deciding code", () => {
     expect(smokeVerdict(1, "error")).toMatchObject({ ok: false });
     expect(smokeVerdict(124, "Traceback (most recent call last):\n ImportError: x")).toMatchObject({ ok: false, why: "the command raised a Python exception" });
     expect(smokeVerdict(null, "")).toMatchObject({ ok: false });
+    // LoRA r3: the timeout's SIGTERM makes torch.distributed's launcher print a traceback; training was running.
+    const sig = "epoch 0 step 10\nTraceback (most recent call last):\n  File \"run.py\", line 709, in run\n    time.sleep(monitor_interval)\ntorch.distributed.elastic.multiprocessing.api.SignalException: Process 12 got signal: 15\n";
+    expect(smokeVerdict(124, sig)).toMatchObject({ ok: true });
+    expect(smokeVerdict(124, "Traceback (most recent call last):\n  x\nKeyboardInterrupt\n")).toMatchObject({ ok: true });
+    // Not excused: the same traceback without the timeout firing, or a real error next to it.
+    expect(smokeVerdict(1, sig)).toMatchObject({ ok: false });
+    expect(smokeVerdict(124, sig + "Traceback (most recent call last):\n  File \"t.py\"\nRuntimeError: CUDA out of memory\n")).toMatchObject({ ok: false });
+    expect(smokeVerdict(124, "Traceback (most recent call last):\n  File \"t.py\"\nValueError: bad\nduring handling, SignalException: got signal: 15\n")).toMatchObject({ ok: false });
   });
 
   it("validates the planner's output and enforces at least three seeds", () => {

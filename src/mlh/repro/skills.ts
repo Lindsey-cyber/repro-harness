@@ -202,7 +202,12 @@ const claims: Skill = {
 // (training had started), with no Python traceback. The agent's own "runnable" is not trusted.
 export const SMOKE_S = 100;
 export function smokeVerdict(exit: number | null, output: string): { ok: boolean; why: string } {
-  if (/Traceback \(most recent call last\)/.test(output)) return { ok: false, why: "the command raised a Python exception" };
+  // A traceback the smoke test's own timeout caused is not an error: torch.distributed's launcher prints
+  // "SignalException: ... got signal: 15" when timeout stops it (LoRA r3 failed its smoke test on this
+  // while training ran fine). Every traceback must end in such a signal, and the timeout must have fired.
+  const blocks = output.split(/Traceback \(most recent call last\)/).slice(1);
+  const bySignal = (b: string) => /(SignalException\b.*got signal: (15|2)\b|^KeyboardInterrupt\s*$)/m.test(b) && !/^\w*(Error|Exception)\b(?!.*got signal)/m.test(b.replace(/^.*SignalException.*$/gm, ""));
+  if (blocks.length && !(exit === 124 && blocks.every(bySignal))) return { ok: false, why: "the command raised a Python exception" };
   if (exit === 0) return { ok: true, why: "the command exited cleanly" };
   if (exit === 124) return { ok: true, why: `the command was still running after ${SMOKE_S} s with no error` };
   return { ok: false, why: `the command exited with status ${exit}` };
@@ -468,7 +473,7 @@ const debug: Skill = {
     const spec: unknown = gp ? (stageName ? gp.stages.find((x) => x.id === stageName) : gp) : specsOf(ctx.state).find((x) => x.claim === claim)!;
     const base = need(ctx).versionDir(version);
     const site = currentSite(ctx.state);
-    const evidence = why === "failure" ? `The run failed:\n${failureText(ctx.state, failedRun).slice(0, 3000)}` : `The runs gave ${JSON.stringify(outOf<{ values: number[]; mean: number }>(ctx.state, String(ctx.node.params.trigger)))} but the paper claims ${c.value}.`;
+    const evidence = why === "failure" ? `The run failed:\n${failureText(ctx.state, failedRun).slice(0, 3000)}` : `The runs gave ${JSON.stringify(outOf<{ values: number[]; mean: number }>(ctx.state, String(ctx.node.params.trigger)))} but the paper claims ${c.value}.\n${MISMATCH_FIRST}`;
     const prior = ctx.state.order.filter((id) => id.startsWith(`${N.debug}:${claim}:`) && id !== ctx.node.id && ctx.state.nodes.get(id)!.status === "succeeded").map((id) => outOf<{ causes: unknown; patch_intent?: string }>(ctx.state, id));
     const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), role: DEBUG_ROLE, workDir: ctx.workDir(), source: base, ...(site ? { site } : {}), task: (need(ctx).gpu ? `Budget left for this paper: $${need(ctx).gpu!.budget.remaining().toFixed(2)}. ` : "") + `Objective: ${ctx.state.objective}\nClaim: ${JSON.stringify(c)}\nPlanned run: ${JSON.stringify(spec)}\n${evidence}\nEnvironment notes: ${JSON.stringify(outOf<Record<string, unknown>>(ctx.state, N.env)?.launch ?? {})}\nEarlier diagnoses for this claim: ${JSON.stringify(prior)}` });
     if (!r.report) throw new SkillError("experiment_error", "debugger ran out of steps without a report");
@@ -480,6 +485,10 @@ const debug: Skill = {
     return { output: { claim, causes: r.report.causes ?? [], patch_intent: r.report.patch_intent ?? "", expected_effect: r.report.expected_effect ?? "", changed, diff: diff.slice(0, 30000), ...(argv ? { run_argv: argv } : {}), hasPatch: changed.length > 0 || !!argv || !!pipChanged, workspace: r.workspace, ...(r.site ? { site: r.site } : {}), ...(pipChanged ? { pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, system: r.system ?? [] } : {}), steps: r.steps } };
   },
 };
+
+// LoRA r3: a debugger spent 26 steps grepping the README for the paper's number while the cause was the
+// recipe (the paper's 8-GPU effective batch run on one GPU). A mismatch starts at the recipe.
+export const MISMATCH_FIRST = "The run worked; the number differs. Start with the recipe: compare the planned run, setting by setting, with the paper and with the repository's own launch scripts (number of GPUs or processes and so the effective batch, per-device batch, gradient accumulation, epochs, learning rate and schedule, warmup, sequence length, precision, data split, which epoch and how seeds are reported). Report every difference you find as a cause before looking anywhere else. Searching documents for the paper's number is not a diagnosis.";
 
 const patch: Skill = {
   id: N.patch, version: "1.0.0", purpose: "setup", intents: ["reproduce"], actions: [], after: [], needs: () => null,

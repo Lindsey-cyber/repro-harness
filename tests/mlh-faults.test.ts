@@ -92,6 +92,10 @@ describe("P2: platform faults", () => {
     await run(ws);
     expect(claims(ws.runDir)).toEqual(CLEAN);
     expect(roleOutcomes(journal(ws.runDir)).env).toMatchObject({ ok: false, why: expect.stringMatching(/repair/) });
+    // An operator's journaled ruling that the failure was the harness's removes it as evidence (LoRA r3).
+    const ev = [...journal(ws.runDir), { t: "excuse", at: "2026-11-09T00:00:00Z", id: "repro.env", reason: "smoke judged its own timeout" }];
+    expect(roleOutcomes(ev as never).env).toBeNull();
+    expect(roleOutcomes(ev as never).planner).toMatchObject({ ok: true });
   }, 60_000);
 
   it("GPU out of memory: classed resource, never blamed on an agent, the run ends with a named outcome", async () => {
@@ -413,5 +417,8 @@ describe("P1: a faithful run that misses the paper's number", () => {
     expect(j.filter((e) => e.t === "start" && String(e.id).startsWith("repro.debug")).length).toBe(1);
     expect(j.find((e) => e.t === "hold" && String(e.id).startsWith("repro.patch"))?.reason).toMatch(/after a mismatch/);
     expect(claims(ws.runDir)[0]![1]).toBe("not_reproduced");
+    // The debugger is told to start at the recipe, not to search documents for the number (LoRA r3).
+    const { execSync } = await import("node:child_process");
+    expect(execSync(`grep -rl "Start with the recipe" ${JSON.stringify(ws.runDir)} || true`, { encoding: "utf8" })).toMatch(/debug/);
   }, 60_000);
 });
