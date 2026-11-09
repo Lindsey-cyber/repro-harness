@@ -1,9 +1,9 @@
 {
  "claims": {
   "level": "probation",
-  "n": 3,
-  "ok": 3,
-  "lower": 0.4384939195509822,
+  "n": 4,
+  "ok": 4,
+  "lower": 0.5100999795960008,
   "history": [
    {
     "at": "2026-11-09T04:22:30.097Z",
@@ -20,6 +20,12 @@
    {
     "at": "2026-11-09T10:46:14.510Z",
     "paper": "r2c/ft_transformer",
+    "ok": true,
+    "why": "every extracted number is in the PDF"
+   },
+   {
+    "at": "2026-11-09T16:41:53.507Z",
+    "paper": "r3/lora",
     "ok": true,
     "why": "every extracted number is in the PDF"
    }
@@ -53,9 +59,9 @@
  },
  "planner": {
   "level": "probation",
-  "n": 3,
-  "ok": 3,
-  "lower": 0.4384939195509822,
+  "n": 4,
+  "ok": 4,
+  "lower": 0.5100999795960008,
   "history": [
    {
     "at": "2026-11-09T04:22:30.097Z",
@@ -72,6 +78,12 @@
    {
     "at": "2026-11-09T10:46:14.510Z",
     "paper": "r2c/ft_transformer",
+    "ok": true,
+    "why": "plan accepted"
+   },
+   {
+    "at": "2026-11-09T16:41:53.507Z",
+    "paper": "r3/lora",
     "ok": true,
     "why": "plan accepted"
    }
