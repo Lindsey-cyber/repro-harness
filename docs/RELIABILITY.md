@@ -124,3 +124,13 @@ rerun P5 from scratch.
 
 Process lesson recorded: a long run must be reviewed every few minutes until it is known to be
 normal; P5 attempt 2 was caught at 5 minutes this way.
+
+### Finding, DETR run (05:21Z): a confident wrong verdict — fix first
+The stage ran correctly after the debugger's accepted patch (no pretrained backbone download), but
+the planner's `parse` regex matched several COCO summary lines and the harness took the last match:
+0.574 is AR@100, not AP@[.50:.95] (paper 0.420). The run reports `not_reproduced`, which is false.
+The debugger cannot fix it (changing measurement is high risk, needs a human). Fix before any other
+run: `parseMetric` must treat more than one distinct match as ambiguous (no verdict, back to the
+planner), the planner prompt must ask for a regex anchored on the metric's own label, and a
+regression test must use DETR's real COCO summary output.
+Also open: run the env smoke test without network (stages have none), so hidden downloads surface there.
