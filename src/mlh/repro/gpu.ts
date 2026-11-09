@@ -102,6 +102,9 @@ export interface GpuPlan {
   unknownHosts: string[];
   stages: Stage[];
   claims: { claim: string; stage: string; parse: string; scale?: number; select?: "last" | "max" | "min"; aggregate?: "mean" | "median" }[];
+  // Claims the plan does not measure, each with its reason (e.g. ImageNet pre-training far beyond the
+  // budget). Reported as not attempted: never stood in for by a different dataset or method.
+  unmeasured: { claim: string; reason: string }[];
   seeds: number[];
   seedArg?: string;
   seedEnv?: string;
@@ -112,7 +115,29 @@ export interface GpuPlan {
 const INTERP = /^(.*\/)?(python[\d.]*|sh|bash|zsh|dash)$/;
 const INLINE = (argv: string[]) => INTERP.test(argv[0] ?? "") && argv.slice(1).some((a) => /^-[a-zA-Z]*c$/.test(a));
 
-export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number; cpu?: number; mem?: number; exists?: (path: string) => boolean }): { plan?: GpuPlan; errors: string[] } {
+// A claim is measured on its own dataset with its own method, never a stand-in (SimSiam r3: the planner
+// mapped the ImageNet claims to a CIFAR-10 run and "SimSiam without stop-gradient" to a SimCLR run).
+// Judged against the rest of the plan, so a repository that never names its data is not penalized:
+// a stage that names another claim's dataset but not this claim's is a stand-in; so is a stage that
+// lacks the method's name while the plan's other stages carry it. Names are compared without case and
+// punctuation ("CIFAR-10" = cifar10); the repository files a stage names (configs) count. Pure.
+const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+const methodKey = (m?: string) => norm((m ?? "").split(/[\s(/,]/)[0] ?? "");
+export function stageText(st: { argv: string[]; env?: Record<string, string> }, read?: (path: string) => string | undefined): string {
+  const files = st.argv.filter((a) => /^[\w./-]+\.(ya?ml|json|cfg|ini|toml|sh)$/.test(a)).map((a) => read?.(a.replace(/^\/work\//, "")) ?? "");
+  return norm([...st.argv, ...Object.entries(st.env ?? {}).flat(), ...files].join(" "));
+}
+export function claimFitErrors(c: { id: string; dataset?: string; method?: string }, st: { id: string; argv: string[]; env?: Record<string, string> }, others: { datasets: string[]; stageTexts: string[] }, read?: (path: string) => string | undefined): string[] {
+  const text = stageText(st, read), errs: string[] = [];
+  const ds = norm(c.dataset ?? "");
+  const other = others.datasets.map(norm).filter((d) => d.length >= 3 && d !== ds && !ds.includes(d) && !d.includes(ds) && text.includes(d));
+  if (ds.length >= 3 && !text.includes(ds) && other.length) errs.push(`${c.id}: the claim is on ${c.dataset}, but stage ${st.id} runs on another dataset of this paper (${other.join(", ")}) and never names ${c.dataset}: measure it on ${c.dataset}, or list it in unmeasured with the reason`);
+  const m = methodKey(c.method);
+  if (m.length >= 3 && !text.includes(m) && others.stageTexts.some((t) => t !== text && t.includes(m))) errs.push(`${c.id}: the claim is about ${c.method}, but stage ${st.id} never names ${(c.method ?? "").split(/[\s(/,]/)[0]} while the plan's other stages do (a different method is not a stand-in): measure it with ${c.method}, or list it in unmeasured with the reason`);
+  return errs;
+}
+
+export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number; cpu?: number; mem?: number; exists?: (path: string) => boolean; read?: (path: string) => string | undefined }): { plan?: GpuPlan; errors: string[] } {
   const errors: string[] = [];
   const r = raw as Partial<GpuPlan> & { stages?: Partial<Stage>[]; claims?: { claim?: string; stage?: string; parse?: string; scale?: number }[] };
   if (!r || !Array.isArray(r.stages) || !r.stages.length) return { errors: ["plan has no stages"] };
@@ -209,10 +234,20 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     const hits = claims.filter((c) => pct(c.value).some((f) => new RegExp(`(?<![\\d.])${f.replace(".", "\\.")}(?![\\d])`).test(name)));
     return hits.length === 1 ? hits[0]!.id : undefined;
   };
+  const unmeasured: GpuPlan["unmeasured"] = [];
+  const skip = Array.isArray((r as { unmeasured?: unknown }).unmeasured) ? (r as { unmeasured: { claim?: unknown; reason?: unknown }[] }).unmeasured : [];
   for (const c of claims) {
     const m = (r.claims ?? []).find((x) => typeof x?.claim === "string" && resolve(x.claim) === c.id);
+    const u = skip.find((x) => typeof x?.claim === "string" && resolve(x.claim) === c.id);
+    if (u) {
+      if (m) { errors.push(`${c.id}: listed both as measured and as unmeasured`); continue; }
+      if (String(u.reason ?? "").trim().length < 20) { errors.push(`${c.id}: an unmeasured claim needs its reason (what it would take, why that is out of reach)`); continue; }
+      unmeasured.push({ claim: c.id, reason: String(u.reason).trim().slice(0, 500) }); continue;
+    }
     if (!m) { errors.push(`no stage measures claim ${c.id} (set "claim" to exactly one of: ${claims.map((x) => JSON.stringify(x.id)).join(", ")})`); continue; }
     if (!stages.some((s) => s.id === m.stage)) { errors.push(`${c.id}: stage ${m.stage} does not exist`); continue; }
+    const fit = claimFitErrors(c, stages.find((s) => s.id === m.stage)!, { datasets: claims.map((x) => x.dataset ?? ""), stageTexts: stages.map((x) => stageText(x, o.read)) }, o.read);
+    if (fit.length) { errors.push(...fit); continue; }
     let groups = -1;
     try { groups = new RegExp(`${String(m.parse)}|`).exec("")!.length - 1; } catch { /* invalid */ }
     if (groups !== 1) { errors.push(`${c.id}: parse must be a regex with exactly one capture group`); continue; }
@@ -239,7 +274,7 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   const idle = stages.filter((st) => !used.has(st.id)).map((st) => st.id);
   if (idle.length) errors.push(`stages ${idle.slice(0, 8).join(", ")}${idle.length > 8 ? ` and ${idle.length - 8} more` : ""} serve no claim; drop them (a claim reads one stage, or use perSeed with seeds for several runs)`);
   if (errors.length || !fidelity) return { errors };
-  return { plan: { fidelity, fidelityNote: String(r.fidelityNote ?? ""), fetch, checks, unknownHosts, stages, claims: cl, seeds, ...(typeof r.seedArg === "string" && /^--?[\w-]+$/.test(r.seedArg) ? { seedArg: r.seedArg } : {}), ...(typeof r.seedEnv === "string" && /^[A-Z_][A-Z0-9_]*$/.test(r.seedEnv) ? { seedEnv: r.seedEnv } : {}), worstCaseUsd }, errors: [] };
+  return { plan: { fidelity, fidelityNote: String(r.fidelityNote ?? ""), fetch, checks, unknownHosts, stages, claims: cl, unmeasured, seeds, ...(typeof r.seedArg === "string" && /^--?[\w-]+$/.test(r.seedArg) ? { seedArg: r.seedArg } : {}), ...(typeof r.seedEnv === "string" && /^[A-Z_][A-Z0-9_]*$/.test(r.seedEnv) ? { seedEnv: r.seedEnv } : {}), worstCaseUsd }, errors: [] };
 }
 
 export const gpuPlanOf = (s: RunState): GpuPlan | undefined => (s.nodes.get(N.plan)?.output as { gpuPlan?: GpuPlan } | undefined)?.gpuPlan;

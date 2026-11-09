@@ -12,7 +12,9 @@ export const MIN_SEEDS = 3;
 export interface Claim { id: string; table?: string; dataset?: string; method?: string; metric: string; value: number; std?: number | null; quote?: string }
 export interface RunSpec { claim: string; argv: string[]; cwd?: string; env?: Record<string, string>; seeds: number[]; seedArg?: string; seedEnv?: string; parse: string; timeoutS: number; scale?: number }
 export interface PatchOut { accepted: boolean; version?: number; risk?: "medium" | "high"; argv?: Record<string, string[]> }
-export type Status = "reproduced" | "not_reproduced" | "not_runnable";
+// inconclusive: a scaled-down run (fewer epochs, a smaller model) missed the number; it can neither confirm
+// nor refute the claim. not_attempted: the plan listed the claim as out of reach, with its reason.
+export type Status = "reproduced" | "not_reproduced" | "not_runnable" | "inconclusive" | "not_attempted";
 
 export function initialNodes(): TaskNode[] {
   return [
@@ -154,7 +156,9 @@ export function finalStatus(s: RunState): Record<string, { status: Status | "pen
     // Newest version first; within a version, the latest comparison (after the latest accepted change).
     const done = cmp.filter((id) => ok(s, id)).map((id) => ({ id, v: Number(s.nodes.get(id)!.node.params.version), i: s.order.indexOf(id), o: out<{ status: Status; mean: number; values: number[] }>(s, id)! })).sort((a, b) => b.v - a.v || b.i - a.i);
     const pending = [...s.nodes.values()].some((x) => x.status === "held" || x.status === "pending" || x.status === "running");
+    const skipped = (out<{ gpuPlan?: { unmeasured?: { claim: string }[] } }>(s, N.plan)?.gpuPlan?.unmeasured ?? []).some((u) => u.claim === c.id);
     if (done[0]) res[c.id] = { status: done[0].o.status, version: done[0].v, mean: done[0].o.mean, values: done[0].o.values, node: done[0].id };
+    else if (skipped) res[c.id] = { status: "not_attempted", version: currentVersion(s).version };
     else res[c.id] = { status: pending ? "pending" : "not_runnable", version: currentVersion(s).version };
   }
   return res;

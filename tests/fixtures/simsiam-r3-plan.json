@@ -1,0 +1,110 @@
+{
+ "claims": [
+  {
+   "id": "simsiam_cifar10_with_stopgrad_linear_acc",
+   "metric": "linear_eval_accuracy",
+   "value": 0.918,
+   "dataset": "CIFAR-10",
+   "method": "SimSiam"
+  },
+  {
+   "id": "simsiam_imagenet_with_stopgrad_linear_ac",
+   "metric": "linear_eval_accuracy",
+   "value": 0.677,
+   "dataset": "ImageNet",
+   "method": "SimSiam w/ stop-grad"
+  },
+  {
+   "id": "simsiam_imagenet_without_stopgrad_linear",
+   "metric": "linear_eval_accuracy",
+   "value": 0.001,
+   "dataset": "ImageNet",
+   "method": "SimSiam w/o stop-grad"
+  }
+ ],
+ "plan": {
+  "fidelity": "scaled",
+  "fidelityNote": "SCALED, for three measured reasons. (a) Epochs cannot be reduced at launch: num_epochs/stop_at_epoch exist only inside the YAMLs and get_args() (arguments.py) parses only -c/--debug/--data_dir/--log_dir/--ckpt_dir/--device/--eval_from/--hide_progress, so the only way to run a shorter schedule from tracked files is configs/simsiam_cifar_quick.yaml (50 train epochs + 30-epoch linear probe) instead of configs/simsiam_cifar.yaml (800 epochs + 100-epoch probe). (b) The full protocol does not fit: measured in this image (torch 1.7.1) on A10G, resnet18_cifar_variant1 at batch 512 costs 0.244 s/optimizer step (~24 s/epoch on GPU) and the quick config measured 33 s/epoch end-to-end (\u224830 s/epoch CPU augmentation floor with num_workers=4), i.e. 800 epochs \u2248 7-10 GPU-hours \u2248 $6-10 on T4/L4/A10G > the $4.96 budget; a timeout-killed run also never reaches the checkpoint save or the linear eval, so it yields no number. (c) Consequently the plan runs the two affordable, COMPLETED CIFAR-10 runs in the repo and reports linear-eval accuracy (the claim metric) for both: stage train_eval_simsiam_cifar_stopgrad = SimSiam WITH stop-gradient (configs/simsiam_cifar_quick.yaml, 50/800 epochs, 30/100 probe epochs, torchvision resnet18 7x7/2 stem instead of the paper's resnet18_cifar_variant1 - substituting the CIFAR stem needs a new committed config, which a planner cannot add), and stage train_eval_simclr_cifar_nostopgrad = configs/simclr_cifar.yaml, the only Siamese training in this checkout that takes gradients on both branches (no stop-gradient), 100/800 epochs on the paper's resnet18_cifar_variant1 + 30-epoch probe. Deviations from the paper that make absolute values differ: 50/100 of 800 epochs, 30 of 100 probe epochs, ImageNet-scale data replaced by CIFAR-10, and SimCLR's negative pairs in place of the exact \"SimSiam loss without z.detach()\" arm. Claim mapping is the closest available evidence, not an exact reproduction: simsiam_cifar10_with_stopgrad_linear_acc and simsiam_imagenet_with_stopgrad_linear_ac are both read from the SimSiam-with-stop-grad CIFAR run (the ImageNet arm cannot be trained: ImageNet-1k is not fetchable here and 100 epochs of ImageNet = ~100 GPU-hours > budget), and simsiam_imagenet_without_stopgrad_linear is read from the only no-stop-gradient run available (SimCLR); the exact ablation arm is impossible in this checkout because models/simsiam.py hardcodes z = z.detach() in both D() branches ('original' and 'simplified') and no yaml key or get_model() argument reaches it - adding a stop_grad flag threaded through models/__init__.py:get_model is a code change only a debugger can commit. Note also tools/knn_monitor.py hardcodes .cuda() (harmless on GPU) and both chosen configs have knn_monitor/knn disabled, so the reported metric is the claim's linear_eval_accuracy, not the kNN monitor. The pipeline was smoke-verified end-to-end on CPU with --debug ('Model saved ... ' then 'Accuracy = 12.50'), including the final linear_eval.py print that the regex captures.",
+  "fetch": [
+   {
+    "url": "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz",
+    "to": "/cache/data/cifar10",
+    "sha256": "6d958be074577803d12ecdefd02955f39262c83c16fe9348329d7fe0b5c001ce",
+    "unpack": "tar"
+   }
+  ],
+  "stages": [
+   {
+    "id": "train_eval_simsiam_cifar_stopgrad",
+    "argv": [
+     "python",
+     "main.py",
+     "--data_dir",
+     "/cache/data/cifar10",
+     "--log_dir",
+     "/tmp/simsiam-logs",
+     "--ckpt_dir",
+     "/tmp/simsiam-ckpt",
+     "--config-file",
+     "configs/simsiam_cifar_quick.yaml",
+     "--hide_progress"
+    ],
+    "timeoutS": 4200,
+    "needs": [],
+    "persist": [],
+    "gpu": "T4",
+    "gpuMemGB": 12,
+    "env": {
+     "PYTHONUNBUFFERED": "1"
+    }
+   },
+   {
+    "id": "train_eval_simclr_cifar_nostopgrad",
+    "argv": [
+     "python",
+     "main.py",
+     "--data_dir",
+     "/cache/data/cifar10",
+     "--log_dir",
+     "/tmp/simclr-logs",
+     "--ckpt_dir",
+     "/tmp/simclr-ckpt",
+     "--config-file",
+     "configs/simclr_cifar.yaml",
+     "--hide_progress"
+    ],
+    "timeoutS": 7200,
+    "needs": [],
+    "persist": [],
+    "gpu": "T4",
+    "gpuMemGB": 12,
+    "env": {
+     "PYTHONUNBUFFERED": "1"
+    }
+   }
+  ],
+  "claims": [
+   {
+    "claim": "simsiam_cifar10_with_stopgrad_linear_acc",
+    "stage": "train_eval_simsiam_cifar_stopgrad",
+    "parse": "Accuracy = ([0-9.]+)",
+    "scale": 0.01
+   },
+   {
+    "claim": "simsiam_imagenet_with_stopgrad_linear_ac",
+    "stage": "train_eval_simsiam_cifar_stopgrad",
+    "parse": "Accuracy = ([0-9.]+)",
+    "scale": 0.01
+   },
+   {
+    "claim": "simsiam_imagenet_without_stopgrad_linear",
+    "stage": "train_eval_simclr_cifar_nostopgrad",
+    "parse": "Accuracy = ([0-9.]+)",
+    "scale": 0.01
+   }
+  ],
+  "seeds": [
+   0
+  ]
+ }
+}

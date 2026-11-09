@@ -51,6 +51,28 @@ describe("metric extraction", () => {
   });
 });
 
+describe("a claim is measured on its own dataset and method, or listed as unmeasured (SimSiam r3)", async () => {
+  const { validateGpuPlan } = await import("../src/mlh/repro/gpu.ts");
+  const { gpuPrice } = await import("../src/mlh/backends/modal.ts");
+  const { claims, plan } = JSON.parse(readFileSync("tests/fixtures/simsiam-r3-plan.json", "utf8"));
+  const read = (f: string) => { try { return readFileSync(`tests/fixtures/simsiam-configs/${f.split("/").at(-1)}`, "utf8"); } catch { return undefined; } };
+  const v = (raw: unknown) => validateGpuPlan(claims, raw, { budgetUsd: 50, price: gpuPrice, read });
+  it("the recorded plan is rejected: ImageNet claims on a CIFAR-10 run, SimSiam without stop-grad on a SimCLR run", () => {
+    const e = v(plan).errors.join("\n");
+    expect(e).toMatch(/simsiam_imagenet_with_stopgrad_linear_ac: the claim is on ImageNet, but stage train_eval_simsiam_cifar_stopgrad runs on another dataset of this paper \(cifar10\)/);
+    expect(e).toMatch(/simsiam_imagenet_without_stopgrad_linear: .*(ImageNet|SimSiam)/);
+    expect(e).toMatch(/never names SimSiam while the plan's other stages do/);
+    expect(e).not.toMatch(/simsiam_cifar10_with_stopgrad_linear_acc/); // the CIFAR claim's own run is fine
+  });
+  it("with the ImageNet claims listed as unmeasured (with reasons) the plan passes and records them", () => {
+    const fixed = { ...plan, stages: plan.stages.slice(0, 1), claims: plan.claims.slice(0, 1), unmeasured: claims.slice(1).map((c: { id: string }) => ({ claim: c.id, reason: "ImageNet pre-training needs 8 GPUs for days, far beyond the budget" })) };
+    const r = v(fixed);
+    expect(r.errors).toEqual([]);
+    expect(r.plan!.unmeasured.map((u) => u.claim)).toEqual(claims.slice(1).map((c: { id: string }) => c.id));
+    expect(v({ ...fixed, unmeasured: fixed.unmeasured.map((u: object) => ({ ...u, reason: "too big" })) }).errors.join()).toMatch(/needs its reason/);
+  });
+});
+
 describe("a parse pattern may not encode expected results", async () => {
   const { validateGpuPlan } = await import("../src/mlh/repro/gpu.ts");
   const { gpuPrice } = await import("../src/mlh/backends/modal.ts");

@@ -412,6 +412,18 @@ describe("P2: a stage that hits its time limit", () => {
   }, 60_000);
 });
 
+describe("P1: a scaled-down run that misses the paper's number", () => {
+  it("is inconclusive, not a refutation", async () => {
+    const ws = workspace();
+    const s = canaryScript();
+    const pa = s.plan[0]!.args as { fidelity: string; stages: { argv: string[] }[] };
+    pa.fidelity = "scaled"; pa.stages[0]!.argv = ["python3", "train.py", "--steps", "50"]; // prints 0.5, paper says 0.9
+    s.debug = [{ name: "report", args: { causes: [{ category: "run.scaled", evidence: "fewer steps" }], expected_effect: "none" } }];
+    await run(ws, s);
+    expect(claims(ws.runDir)[0]![1]).toBe("inconclusive");
+  }, 60_000);
+});
+
 describe("P1: a faithful run that misses the paper's number", () => {
   it("one diagnostic round; any change it proposes is held for a human; the verdict stays not_reproduced", async () => {
     const ws = workspace();
