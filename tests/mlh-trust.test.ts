@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pipelineMetric } from "../src/mlh/repro/campaign.ts";
+import { pipelineMetric } from "../src/mlh/repro/retro.ts";
 import { emptyStore, record, roleOutcomes, scaleGate, STANDARD, wilsonLower, type Outcome, type Role } from "../src/mlh/repro/trustscore.ts";
 
 const at = "2026-01-01T00:00:00Z";
@@ -21,7 +21,7 @@ describe("trust scores", () => {
       ok("repro.claims", { rejected: [] }),
       ok("repro.env", { smoke: { ok: true }, repaired: true }),
       fail("repro.plan", "contract_violation"), ok("repro.plan"),
-      fail("repro.stage:train:v1", "nonzero_exit"), ok("repro.debug:c1"),
+      fail("repro.stage:train:v1", "nonzero_exit"), ok("repro.debug:stage-train:v1"),
       ok("repro.patch:c1", { accepted: true, version: 2 }), ok("repro.stage:train:v2"),
     ];
     const o = roleOutcomes(ev as never);
@@ -42,8 +42,15 @@ describe("trust scores", () => {
   });
 
   it("a debugger whose change fixes nothing fails", () => {
-    const o = roleOutcomes([ok("repro.debug:c1"), ok("repro.stage:train:v1"), ok("repro.patch:c1", { accepted: true })] as never);
+    const o = roleOutcomes([ok("repro.debug:stage-train:v1"), ok("repro.stage:train:v1"), ok("repro.patch:c1", { accepted: true })] as never);
     expect(o.debugger?.ok).toBe(false);
+    // Another step succeeding after the patch is not credit for this one.
+    expect(roleOutcomes([ok("repro.debug:stage-train:v1"), ok("repro.patch:c1", { accepted: true }), ok("repro.stage:eval:v2")] as never).debugger?.ok).toBe(false);
+  });
+
+  it("a patch held or refused by the risk policy is no evidence about the debugger", () => {
+    expect(roleOutcomes([ok("repro.debug:stage-train:v1"), ok("repro.patch:c1", { accepted: false, refused: "policy" })] as never).debugger).toBeNull();
+    expect(roleOutcomes([ok("repro.debug:stage-train:v1"), { t: "hold", at, id: "repro.patch:c1", reason: "high risk" }] as never).debugger).toBeNull();
   });
 
   it("promotes only at the standard, demotes on one failure, and gates scale", () => {
@@ -55,9 +62,19 @@ describe("trust scores", () => {
     expect(s.env.level).toBe("trusted");
     expect(scaleGate(s).blockedBy).toEqual([]);
     s = record(s, "p6", at, { ...all(null), env: { ok: false, why: "smoke" } });
-    expect(s.env.level).toBe("probation");
+    expect(s.env).toMatchObject({ level: "probation", n: 0, ok: 0 }); // the count resets
     expect(s.planner.level).toBe("trusted");
     expect(scaleGate(s)).toMatchObject({ maxPapers: 3, blockedBy: ["env"] });
+    s = record(s, "p7", at, { ...all(null), env: { ok: true, why: "" } });
+    expect(s.env.level).toBe("probation"); // one success does not undo a demotion
+  });
+
+  it("a debugger that was never needed does not block scale; once needed it must earn trust", () => {
+    let s = emptyStore();
+    for (let i = 0; i < 6; i++) s = record(s, `p${i}`, at, { claims: { ok: true, why: "" }, env: { ok: true, why: "" }, planner: { ok: true, why: "" }, debugger: null });
+    expect(scaleGate(s).blockedBy).toEqual([]);
+    s = record(s, "p6", at, { ...all(null), debugger: { ok: true, why: "" } });
+    expect(scaleGate(s).blockedBy).toEqual(["debugger"]);
   });
 
   it("pipeline metric counts only fully definitive, unstopped runs", () => {

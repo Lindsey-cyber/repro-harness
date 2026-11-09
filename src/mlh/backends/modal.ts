@@ -154,7 +154,7 @@ async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteR
     const head = e.split("\n")[0]!; // classify the exception, not a build log that mentions "tokenizers"
     // What ran before the failure is charged.
     const ranS = Number(r.elapsed_s) || 0;
-    if (run.gpu && ranS) budget.charge((gpuPrice(run.gpu) * ranS) / 3600);
+    if (ranS) budget.charge(containerCost(run.gpu, ranS));
     return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: containerCost(run.gpu, ranS), files: {}, category: /ResourceExhausted|spending limit|exceeded its spe|billing|insufficient (funds|credit)/i.test(head) ? "provider_fatal" : /ImageBuildError|Image build/.test(head) ? "experiment_error" : /\b(AuthError|Token (ID|secret)|Unauthenticated)\b/.test(head) ? "precondition" : /^(\w+\.)*(Timeout|SandboxTimeout|ExecTimeout)\w*Error|timed out|deadline exceeded/i.test(head) ? "timeout" : "sandbox_transient" };
   }
   const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed);

@@ -13,6 +13,16 @@ const check = (p: string, i: number) => {
 };
 
 describe("recorded planner drafts (campaign c1)", () => {
+  it("no traversal and no whole-volume refs, even next to a valid fetch", () => {
+    const f = load("simcse"), d = structuredClone(f.drafts[2]!.args) as { stages: { argv: string[] }[] };
+    const files = new Set(f.files);
+    const run = (arg: string) => { const x = structuredClone(d); x.stages[1]!.argv = [...x.stages[1]!.argv, arg]; return validateGpuPlan(f.claims, x, { budgetUsd: 5, price: gpuPrice, exists: (p) => files.has(p) }).errors.join(); };
+    expect(run("/cache/runs/../data/other")).toMatch(/"\.\." is not allowed/);
+    expect(run("/cache/data/unsup-simcse-bert-base-uncased/../../x")).toMatch(/"\.\." is not allowed/);
+    expect(run("/cache/data")).toMatch(/\/cache\/data is not produced/);
+    expect(run("/cache/data/unsup-simcse-bert-base-uncased")).toBe("");
+  });
+
   it("detr: http and off-/cache/data fetches rejected; the corrected plan passes", () => {
     expect(check("detr", 0).errors.join()).toMatch(/must be https/);
     expect(check("detr", 1).plan?.fidelity).toBeDefined();

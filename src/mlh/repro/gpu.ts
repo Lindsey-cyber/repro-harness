@@ -71,7 +71,7 @@ export interface GpuPlan {
 const INTERP = /^(.*\/)?(python[\d.]*|sh|bash|zsh|dash)$/;
 const INLINE = (argv: string[]) => INTERP.test(argv[0] ?? "") && argv.slice(1).some((a) => /^-[a-zA-Z]*c$/.test(a));
 
-export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number; exists?: (path: string) => boolean }): { plan?: GpuPlan; errors: string[] } {
+export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number; cpu?: number; exists?: (path: string) => boolean }): { plan?: GpuPlan; errors: string[] } {
   const errors: string[] = [];
   const r = raw as Partial<GpuPlan> & { stages?: Partial<Stage>[]; claims?: { claim?: string; stage?: string; parse?: string; scale?: number }[] };
   if (!r || !Array.isArray(r.stages) || !r.stages.length) return { errors: ["plan has no stages"] };
@@ -133,11 +133,13 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   // Every /cache path a stage uses must come from a fetch item: data whose origin is unknown cannot be reproduced.
   for (const st of stages) {
     for (const ref of [...st.argv, ...Object.values(st.env ?? {})].flatMap((a) => a.match(/\/cache\/[\w./-]+/g) ?? [])) {
+      // No traversal: "/cache/runs/../data/x" or "/cache/data/a/../../etc" would escape every rule below.
+      if (ref.split("/").includes("..")) { errors.push(`${st.id}: ${ref}: ".." is not allowed in /cache paths`); continue; }
       if (ref.startsWith("/cache/runs/")) continue;
       const under = (a: string, b: string) => a === b || a.startsWith(b.endsWith("/") ? b : `${b}/`);
       // A fetched file, a path inside a fetched archive, or a directory the fetch items fill.
       const r0 = ref.replace(/\/$/, "");
-      if (!fetch.some((f) => { const t = f.to.replace(/\/$/, ""); return under(r0, t) || under(t, r0); })) errors.push(r0.startsWith("/cache/data/") ? `${st.id}: ${ref} is not produced by any fetch item; declare where it comes from (fetch: [{url, to: "/cache/data/..."}])` : `${st.id}: ${ref} is not produced by any fetch item: inputs go under /cache/data/ via fetch items; write outputs (logs, checkpoints) under /cache/runs/`);
+      if (!fetch.some((f) => { const t = f.to.replace(/\/$/, ""); return under(r0, t) || (r0.startsWith("/cache/data/") && under(t, r0)); })) errors.push(r0.startsWith("/cache/data/") ? `${st.id}: ${ref} is not produced by any fetch item; declare where it comes from (fetch: [{url, to: "/cache/data/..."}])` : `${st.id}: ${ref} is not produced by any fetch item: inputs go under /cache/data/ via fetch items; write outputs (logs, checkpoints) under /cache/runs/`);
     }
   }
   const unknownHosts = [...new Set(fetch.map((f) => new URL(f.url).hostname).filter((h) => !DATA_HOSTS.some((d) => h === d || h.endsWith(`.${d}`))))];
@@ -162,7 +164,7 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   const seeds = [...new Set((Array.isArray(r.seeds) ? r.seeds : [0]).filter((x) => Number.isInteger(x)))].slice(0, 5);
   if (!seeds.length) seeds.push(0);
   // Worst case: every stage instance runs to its timeout, plus container start-up.
-  const worstCaseUsd = stages.reduce((a, s) => a + (s.gpu ? (o.price(s.gpu) * (s.timeoutS + 300)) / 3600 : (0.1 * (s.timeoutS + 300)) / 3600) * (s.perSeed ? seeds.length : 1), 0);
+  const worstCaseUsd = stages.reduce((a, s) => a + (s.gpu ? (o.price(s.gpu) * (s.timeoutS + 300)) / 3600 : ((o.cpu ?? 0.1) * (s.timeoutS + 300)) / 3600) * (s.perSeed ? seeds.length : 1), 0);
   if (worstCaseUsd > o.budgetUsd) errors.push(`worst-case cost $${worstCaseUsd.toFixed(2)} exceeds the budget $${o.budgetUsd.toFixed(2)}: lower fidelity, shorter timeouts, fewer seeds or a cheaper GPU`);
   if (errors.length || !fidelity) return { errors };
   return { plan: { fidelity, fidelityNote: String(r.fidelityNote ?? ""), fetch, checks, unknownHosts, stages, claims: cl, seeds, ...(typeof r.seedArg === "string" && /^--?[\w-]+$/.test(r.seedArg) ? { seedArg: r.seedArg } : {}), ...(typeof r.seedEnv === "string" && /^[A-Z_][A-Z0-9_]*$/.test(r.seedEnv) ? { seedEnv: r.seedEnv } : {}), worstCaseUsd }, errors: [] };

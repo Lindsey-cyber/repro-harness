@@ -62,6 +62,12 @@ async function main(): Promise<void> {
       console.log(`approved ${id}; run \`npm run mlh -- resume ${runDir}\``);
       break;
     }
+    case "campaign-retro": {
+      // Idempotent: the chain calls it for every finished round, whatever code version ran that round.
+      const { retroRound } = await import("./repro/campaign.ts");
+      console.log(retroRound(positional[0]!, flag("out") ?? "bench/complex/results") ? `retro written for ${positional[0]}` : `no retro needed for ${positional[0]}`);
+      break;
+    }
     case "campaign-status": {
       const { campaignStatus } = await import("./repro/campaign.ts");
       console.log(campaignStatus(positional[0] ?? "c1"));
