@@ -36,7 +36,7 @@ import { parseDiff, riskOf } from "./patchrisk.ts";
 import { CLAIMS_PROMPT, DEBUG_ROLE, ENV_ROLE, PLAN_ROLE } from "./roles.ts";
 import type { SiteManager } from "./site.ts";
 import { Budget, cpuPrice, gpuPrice, modalRun } from "../backends/modal.ts";
-import { DATA_DOMAINS, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, validateGpuPlan, type Stage } from "./gpu.ts";
+import { DATA_DOMAINS, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, imageForPins, validateGpuPlan, type Stage } from "./gpu.ts";
 import { GPU_PLAN_ROLE } from "./roles.ts";
 
 export interface ReproCtx {
@@ -185,6 +185,10 @@ const env: Skill = {
   summary: "The environment agent installs what the repository needs and finds how to launch it; it may not edit code.",
   output: any,
   async run(ctx) {
+    const src0 = need(ctx).versionDir(0);
+    const pins = ["requirements.txt", "requirements/base.txt", "setup.py", "environment.yml", "environment.yaml"].map((f) => join(src0, f)).filter((f) => existsSync(f)).map((f) => readFileSync(f, "utf8")).join("\n");
+    const pin = need(ctx).gpu ? imageForPins(pins) : undefined;
+    const pinHint = pin ? ` The repository pins torch ${pin.torch}: start with install(image="${pin.key}"), whose Python and torch match it.` : "";
     const remote = need(ctx).gpu ? ` Commands run in a remote Linux container (default image ${DEFAULT_IMAGE_KEY}: Python 3.11, CUDA PyTorch 2.5.1). If the repository needs an older Python/PyTorch, switch the base image with install(image=...) FIRST (${Object.keys(IMAGES).join(", ")}) rather than forcing old packages into a new Python. Packages and image you choose are used by every later stage. Check imports on CPU; use a GPU only for a short probe if needed.` : "";
     // Environment cache: the same source tree whose environment already passed the harness's smoke test is
     // reused after the smoke test passes again (minutes instead of a 10–25 minute agent session).
@@ -194,7 +198,7 @@ const env: Skill = {
       const sm = await smoke(ctx, hit.launch as never, hit.pip, undefined, hit.image);
       if (sm.ok) return { output: { ...hit, cached: true, smoke: { ok: true, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) } } };
     }
-    const base = { ...loopBase(ctx), ...remoteFor(ctx, []), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}` };
+    const base = { ...loopBase(ctx), ...remoteFor(ctx, []), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}${pinHint}` };
     let r = await agentLoop({ ...base, role: ENV_ROLE });
     // Complex repositories need more than one step budget: an agent that stopped at its limit with the
     // experiment still not runnable continues from its checkpoint (two more rounds at most).

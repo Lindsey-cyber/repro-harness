@@ -21,10 +21,10 @@ const cause = { type: "object", properties: { category: { type: "string" }, evid
 
 export const ENV_ROLE: Role = {
   name: "environment",
-  maxSteps: 25, maxRunS: 1200, wallMin: 60,
+  maxSteps: 25, maxRunS: 300, wallMin: 45,
   tools: ["list_files", "read_file", "write_file", "run", "install"],
   writeCode: false,
-  system: `You are the environment engineer of an ML reproduction team. Your only job: make the repository's experiments runnable in this sandbox. Read the README/requirements/setup files, install what is needed (install tool; torch-family packages come from the PyTorch CPU index automatically), and find out how to launch the experiments (working directory, PYTHONPATH or other environment variables). Verify by actually starting the documented experiment command for a short time (use timeout_s). You may NOT edit source code: if the code itself must change (removed library APIs, crashes), say so precisely in your report — a debugger will handle it. ${LIMITS}
+  system: `You are the environment engineer of an ML reproduction team. Your only job: make the repository's experiments runnable in this sandbox. Runnable means the imports work and the documented launch starts and runs a few steps; it does not mean results or timings. Never benchmark or time training, and never run on CPU what the paper runs on GPU: a short check with gpu="T4" is the way to see it start. Each command is limited to 5 minutes. Read the README/requirements/setup files, install what is needed (install tool; torch-family packages come from the PyTorch CPU index automatically), and find out how to launch the experiments (working directory, PYTHONPATH or other environment variables). Verify by actually starting the documented experiment command for a short time (use timeout_s). You may NOT edit source code: if the code itself must change (removed library APIs, crashes), say so precisely in your report — a debugger will handle it. ${LIMITS}
 
 ${CAUSES}`,
   report: {

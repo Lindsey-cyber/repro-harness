@@ -37,6 +37,15 @@ export const IMAGES: Record<string, string> = {
 };
 // Old (wrong) labels still resolve for runs recorded before the fix, but are not offered to agents.
 for (const [old, now] of [["py3.8-torch1.12-cu113", "py3.7-torch1.12-cu113"], ["py3.8-torch1.9-cu111", "py3.7-torch1.10-cu111"], ["py3.7-torch1.7-cu110", "py3.8-torch1.7-cu110"]] as const) Object.defineProperty(IMAGES, old, { value: IMAGES[now], enumerable: false });
+// The base image whose torch matches the repository's own pin (requirements.txt, setup.py,
+// environment.yml). Pure. c1: SimSiam pins torch==1.7.0 and its env agent stayed on Python 3.11.
+export function imageForPins(text: string): { key: string; torch: string } | undefined {
+  const m = /\btorch\s*(?:==|=|>=|~=)\s*(\d+)\.(\d+)/.exec(text);
+  if (!m) return undefined;
+  const want = `${m[1]}.${m[2]}`, key = Object.keys(IMAGES).find((k) => new RegExp(`-torch${want.replace(".", "\\.")}-`).test(k));
+  return key ? { key, torch: want } : undefined;
+}
+
 export const DEFAULT_IMAGE_KEY = "py3.11-torch2.5-cu124";
 export interface FetchItem { url: string; to: string; sha256?: string; unpack?: "zip" | "tar" }
 export const MAX_STAGE_S = 6 * 3600;

@@ -16,3 +16,13 @@ describe("doctor", () => {
     expect(Object.keys(IMAGES)).not.toContain("py3.8-torch1.12-cu113");
   });
 });
+
+describe("image for the repository's torch pin", async () => {
+  const { imageForPins } = await import("../src/mlh/repro/gpu.ts");
+  it("maps a pin to the image with that torch (SimSiam: torch==1.7.0)", () => {
+    expect(imageForPins("torch==1.7.0\ntorchvision==0.8.1")).toEqual({ key: "py3.8-torch1.7-cu110", torch: "1.7" });
+    expect(imageForPins("install_requires=['torch>=1.12']")?.key).toBe("py3.7-torch1.12-cu113");
+    expect(imageForPins("numpy==1.18")).toBeUndefined();
+    expect(imageForPins("torch==0.4.1")).toBeUndefined();
+  });
+});
