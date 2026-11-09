@@ -19,3 +19,13 @@ rounds, median <= 45 min/paper.
   kept, since it errs toward not scaling.
 
 ## c2 (simcse, graphsaint, ft_transformer): pending
+
+## Process change (2026-11-09): prove the platform before each round
+c1's remaining failures were all harness/platform, not agent: 5 lora stage failures were the old
+Modal spend limit, the final stop was a capacity shortage misread as fatal, and 3 of 6 image labels
+were wrong (the env agent found it). Each would have been caught by a cheap check, so now:
+- `mlh doctor` probes every image's real python/torch, Modal startup and LLM balance (~2 min, cents);
+  a campaign round will not start without a passing probe from the last 24 h.
+- Modal error classification is one function tested against every recorded error (tests/fixtures/modal-errors.json).
+- Transient provider/sandbox faults back off for minutes instead of 50 ms.
+- Image labels corrected from the probe; old labels still resolve for recorded runs.

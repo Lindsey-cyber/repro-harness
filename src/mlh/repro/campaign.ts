@@ -6,6 +6,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runProc, startProc } from "../io/proc.ts";
+import { doctorFresh, renderDoctor, runDoctor } from "./doctor.ts";
 import { pipelineMetric, renderRetro, roundOf, type Round } from "./retro.ts";
 import { emptyStore, record, renderTrust, roleOutcomes, scaleGate, type TrustStore } from "./trustscore.ts";
 
@@ -193,6 +194,10 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
   // A relaunch is a new attempt at this round: an old marker must not release a waiting chain.
   rmSync(join(base, "done"), { force: true });
   rmSync(join(base, "stopped"), { force: true });
+  // Prove the platform before spending a paper on it: a fresh passing probe, or run one now.
+  const doc = doctorFresh()?.ok ? doctorFresh()! : await runDoctor({ llmBalance, minLlmBalance: numEnv("MLH_MIN_LLM_BALANCE", 3) });
+  appendFileSync(join(o.out, `${o.label}.preflight.log`), renderDoctor(doc) + "\n");
+  if (!doc.ok) { writeFileSync(join(base, "stopped"), `doctor failed ${doc.at}`); return; }
   const rowsFile = join(o.out, `${o.label}.jsonl`);
   const rows: Record<string, unknown>[] = existsSync(rowsFile) ? readFileSync(rowsFile, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
   const done = new Set(rows.map((r) => r.paper));

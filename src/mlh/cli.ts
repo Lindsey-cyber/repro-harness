@@ -62,6 +62,14 @@ async function main(): Promise<void> {
       console.log(`approved ${id}; run \`npm run mlh -- resume ${runDir}\``);
       break;
     }
+    case "doctor": {
+      const { runDoctor, renderDoctor } = await import("./repro/doctor.ts");
+      const { llmBalance } = await import("./repro/campaign.ts");
+      const d = await runDoctor({ llmBalance, minLlmBalance: Number(process.env.MLH_MIN_LLM_BALANCE ?? 3) });
+      console.log(renderDoctor(d));
+      process.exitCode = d.ok ? 0 : 1;
+      break;
+    }
     case "campaign-retro": {
       // Idempotent: the chain calls it for every finished round, whatever code version ran that round.
       const { retroRound } = await import("./repro/campaign.ts");

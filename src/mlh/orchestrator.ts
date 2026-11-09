@@ -245,7 +245,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
       outcome = "fail"; category = cat;
       if (state.nodes.get(n.id)!.status === "pending") {
         retried++;
-        await new Promise((r) => setTimeout(r, 50 * 2 ** attempt));
+        // Capacity and transport faults need minutes, not milliseconds (MLH_BACKOFF_MS scales it; tests set 0).
+        const base = cat === "provider_transient" || cat === "sandbox_transient" ? Number(process.env.MLH_BACKOFF_MS ?? 15_000) : 50;
+        await new Promise((r) => setTimeout(r, Math.min(600_000, base * 2 ** attempt)));
       } else if (mode === "repro") {
         for (const node of flow.afterFail(state, n.id)) if (!state.nodes.has(node.id)) emit({ t: "node", at: now(), node, why: `after ${n.id} failed` });
       }

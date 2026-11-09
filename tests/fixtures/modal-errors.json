@@ -1,0 +1,32 @@
+[
+ {
+  "head": "RuntimeError: ResourceExhaustedError: Workspace ac-X has exceeded its spend limit",
+  "category": "provider_fatal",
+  "source": "recorded c1 lora/ft_transformer"
+ },
+ {
+  "head": "RuntimeError: ResourceExhaustedError: Insufficient capacity to create sandbox.",
+  "category": "provider_transient",
+  "source": "recorded c1 lora debug"
+ },
+ {
+  "head": "ImageBuildError: Image build for im-123 failed",
+  "category": "experiment_error",
+  "source": "pip pins that do not resolve"
+ },
+ {
+  "head": "AuthError: Token ID is malformed",
+  "category": "precondition",
+  "source": "bad Modal token"
+ },
+ {
+  "head": "SandboxTimeoutError: Sandbox timed out",
+  "category": "timeout",
+  "source": "stage exceeded timeoutS"
+ },
+ {
+  "head": "ConnectionError: [Errno 104] Connection reset by peer",
+  "category": "sandbox_transient",
+  "source": "transport"
+ }
+]

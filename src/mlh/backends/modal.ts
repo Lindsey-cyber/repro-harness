@@ -16,6 +16,19 @@ const PRICE: Record<string, number> = { T4: 0.59, L4: 0.8, A10G: 1.1, "A100-40GB
 // Conservative default: ~2 cores + 4 GiB at list price (~$0.13/h); override with MLH_CPU_PRICE.
 export const cpuPrice = () => Number(process.env.MLH_CPU_PRICE ?? 0.13);
 export const containerCost = (gpu: string | undefined, seconds: number) => ((cpuPrice() + (gpu ? gpuPrice(gpu) : 0)) * seconds) / 3600;
+// Every Modal error we have seen, one place, tested against the recorded corpus
+// (tests/fixtures/modal-errors.json). Order matters: capacity before the generic ResourceExhausted.
+export function classifyModalError(head: string): FailureCategory {
+  if (/Insufficient capacity|capacity to create|rate.?limit|Too many requests/i.test(head)) return "provider_transient";
+  if (/spend limit|spending limit|exceeded its spe|billing|insufficient (funds|credit)/i.test(head)) return "provider_fatal";
+  if (/ImageBuildError|Image build/.test(head)) return "experiment_error";
+  if (/\b(AuthError|Token (ID|secret)|Unauthenticated)\b/.test(head)) return "precondition";
+  if (/^(\w+\.)*(Timeout|SandboxTimeout|ExecTimeout)\w*Error|timed out|deadline exceeded/i.test(head)) return "timeout";
+  // Unknown ResourceExhausted (quota of some kind): retry with backoff rather than stop the campaign.
+  if (/ResourceExhausted/.test(head)) return "provider_transient";
+  return "sandbox_transient";
+}
+
 export const gpuPrice = (gpu: string) => Number(process.env[`MLH_GPU_PRICE_${gpu.replace(/\W/g, "_")}`] ?? PRICE[gpu] ?? 4);
 
 export interface RemoteRun {
@@ -155,7 +168,7 @@ async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteR
     // What ran before the failure is charged.
     const ranS = Number(r.elapsed_s) || 0;
     if (ranS) budget.charge(containerCost(run.gpu, ranS));
-    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: containerCost(run.gpu, ranS), files: {}, category: /ResourceExhausted|spending limit|exceeded its spe|billing|insufficient (funds|credit)/i.test(head) ? "provider_fatal" : /ImageBuildError|Image build/.test(head) ? "experiment_error" : /\b(AuthError|Token (ID|secret)|Unauthenticated)\b/.test(head) ? "precondition" : /^(\w+\.)*(Timeout|SandboxTimeout|ExecTimeout)\w*Error|timed out|deadline exceeded/i.test(head) ? "timeout" : "sandbox_transient" };
+    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: containerCost(run.gpu, ranS), files: {}, category: classifyModalError(head) };
   }
   const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed);
   budget.charge(cost);

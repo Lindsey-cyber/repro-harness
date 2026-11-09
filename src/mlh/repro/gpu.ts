@@ -30,10 +30,13 @@ export const IMAGES: Record<string, string> = {
   "py3.11-torch2.5-cu124": "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime",
   "py3.10-torch2.1-cu121": "pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime",
   "py3.10-torch1.13-cu117": "pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime",
-  "py3.8-torch1.12-cu113": "pytorch/pytorch:1.12.1-cuda11.3-cudnn8-runtime",
-  "py3.8-torch1.9-cu111": "pytorch/pytorch:1.9.1-cuda11.1-cudnn8-runtime",
-  "py3.7-torch1.7-cu110": "pytorch/pytorch:1.7.1-cuda11.0-cudnn8-runtime",
+  // Labels are what `mlh doctor` measured inside each image (2026-11-09), not the tag's name.
+  "py3.7-torch1.12-cu113": "pytorch/pytorch:1.12.1-cuda11.3-cudnn8-runtime",
+  "py3.7-torch1.10-cu111": "pytorch/pytorch:1.9.1-cuda11.1-cudnn8-runtime",
+  "py3.8-torch1.7-cu110": "pytorch/pytorch:1.7.1-cuda11.0-cudnn8-runtime",
 };
+// Old (wrong) labels still resolve for runs recorded before the fix, but are not offered to agents.
+for (const [old, now] of [["py3.8-torch1.12-cu113", "py3.7-torch1.12-cu113"], ["py3.8-torch1.9-cu111", "py3.7-torch1.10-cu111"], ["py3.7-torch1.7-cu110", "py3.8-torch1.7-cu110"]] as const) Object.defineProperty(IMAGES, old, { value: IMAGES[now], enumerable: false });
 export const DEFAULT_IMAGE_KEY = "py3.11-torch2.5-cu124";
 export interface FetchItem { url: string; to: string; sha256?: string; unpack?: "zip" | "tar" }
 export const MAX_STAGE_S = 6 * 3600;
