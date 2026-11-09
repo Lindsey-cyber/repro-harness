@@ -192,7 +192,7 @@ const env: Skill = {
     const remote = need(ctx).gpu ? ` Commands run in a remote Linux container (default image ${DEFAULT_IMAGE_KEY}: Python 3.11, CUDA PyTorch 2.5.1). If the repository needs an older Python/PyTorch, switch the base image with install(image=...) FIRST (${Object.keys(IMAGES).join(", ")}) rather than forcing old packages into a new Python. Packages and image you choose are used by every later stage. Check imports on CPU; use a GPU only for a short probe if needed.` : "";
     // Environment cache: the same source tree whose environment already passed the harness's smoke test is
     // reused after the smoke test passes again (minutes instead of a 10–25 minute agent session).
-    const cacheFile = need(ctx).gpu ? join(resolve(".mlh/env-cache"), `${treeHash(need(ctx).versionDir(0))}.json`) : undefined;
+    const cacheFile = need(ctx).gpu ? join(resolve(process.env.MLH_ENV_CACHE ?? ".mlh/env-cache"), `${treeHash(need(ctx).versionDir(0))}.json`) : undefined;
     if (cacheFile && existsSync(cacheFile)) {
       const hit = JSON.parse(readFileSync(cacheFile, "utf8")) as Record<string, unknown> & { pip: string[]; image: string; launch: unknown };
       const sm = await smoke(ctx, hit.launch as never, hit.pip, undefined, hit.image);
@@ -217,7 +217,7 @@ const env: Skill = {
       if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site, r.image); }
     }
     const output = { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, repaired, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps };
-    if (cacheFile && sm.ok) { mkdirSync(resolve(".mlh/env-cache"), { recursive: true }); writeFileSync(cacheFile, JSON.stringify(output)); }
+    if (cacheFile && sm.ok) { mkdirSync(resolve(process.env.MLH_ENV_CACHE ?? ".mlh/env-cache"), { recursive: true }); writeFileSync(cacheFile, JSON.stringify(output)); }
     return { output };
   },
 };

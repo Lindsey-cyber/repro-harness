@@ -99,8 +99,9 @@ async function call(req: Record<string, unknown>, timeoutMs: number): Promise<Re
     MODAL_TOKEN_ID: process.env.MODAL_TOKEN_ID ?? "", MODAL_TOKEN_SECRET: process.env.MODAL_TOKEN_SECRET ?? "",
     ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}),
     ...(process.env.SSL_CERT_FILE ? { SSL_CERT_FILE: process.env.SSL_CERT_FILE, GRPC_DEFAULT_SSL_ROOTS_FILE_PATH: process.env.SSL_CERT_FILE } : {}),
-    REQ: JSON.stringify(req), RUNNER,
+    REQ: JSON.stringify(req), RUNNER: process.env.MLH_MODAL_RUNNER ?? RUNNER, ...(process.env.MLH_MODAL_RUNNER ? Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("MLH_FAKE_")) as [string, string][]) : {}),
   };
+  // MLH_MODAL_RUNNER swaps in a fake runner for offline end-to-end and failure-injection tests.
   const r = await runProc(["sh", "-c", 'printf "%s" "$REQ" | python3 "$RUNNER"'], { cwd: "/tmp", env, timeoutMs });
   try {
     return JSON.parse(r.stdout.trim().split("\n").pop() ?? "") as Record<string, unknown>;
