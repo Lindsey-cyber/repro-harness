@@ -1,0 +1,10 @@
+[
+ {
+  "id": "detr",
+  "arxiv": "2005.12872",
+  "repo": "https://github.com/facebookresearch/detr",
+  "commit": "29901c5",
+  "objective": "Reproduce the COCO val2017 box AP of DETR with a ResNet-50 backbone (Table 1, 500-epoch model) by evaluating the released checkpoint with this repository.",
+  "budgetUsd": 3
+ }
+]

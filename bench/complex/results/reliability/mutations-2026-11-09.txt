@@ -1,0 +1,28 @@
+CAUGHT | M4 chain releases on a crash without a done marker | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 6 passed (7)
+CAUGHT | M5 watchdog exempts a child with no progress yet | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 1 passed (2)
+CAUGHT | M6 crashed-before-journal child is resumed | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 1 passed (2)
+CAUGHT | M7 repro nodes run concurrently again | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 20 passed (21)
+M8 fetched model dir rejected again | PATTERN MISSING
+M9 no cap on agent command time | PATTERN MISSING
+CAUGHT | M10 repeated infra fault does not stop | ⎯⎯⎯⎯⎯⎯⎯ Failed2 ⎯⎯⎯⎯⎯⎯⎯
+2 failed | 41 passed (43)
+CAUGHT | M11 ledger double-counts copied runs | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 21 passed (22)
+CAUGHT | M12 image labels unchecked by doctor | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 3 passed (4)
+CAUGHT | M13 torch pin not mapped to an image | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 3 passed (4)
+M14 debugger credited for another step | PATTERN MISSING
+CAUGHT | M15 demotion keeps the count | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 9 passed (10)
+CAUGHT | M16 platform faults not reopened on resume (dag) | ⎯⎯⎯⎯⎯⎯⎯ Failed2 ⎯⎯⎯⎯⎯⎯⎯
+2 failed | 21 passed (23)
+CAUGHT | M17 inspection classifier lets awk system through | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 17 passed (18)
+SURVIVED | M18 killed-attempt LLM spend dropped | no tests
+CAUGHT | M19 unapproved data host fetched | ⎯⎯⎯⎯⎯⎯⎯ Failed1 ⎯⎯⎯⎯⎯⎯⎯
+1 failed | 20 passed (21)
