@@ -20,6 +20,12 @@ describe("reproduction: deciding code", () => {
     expect(smokeVerdict(1, "error")).toMatchObject({ ok: false });
     expect(smokeVerdict(124, "Traceback (most recent call last):\n ImportError: x")).toMatchObject({ ok: false, why: "the command raised a Python exception" });
     expect(smokeVerdict(null, "")).toMatchObject({ ok: false });
+  });
+  it("the tolerance includes the paper's own rounding (LoRA RTE r3: 0.85199 vs 86.6 +- 0.7)", () => {
+    const c = { id: "rte", metric: "accuracy", value: 0.866, std: 0.007 };
+    expect(statusOf(c, [0.8448, 0.8484, 236 / 277, 0.8556, 0.8664], "median")).toMatchObject({ status: "reproduced" });
+    expect(statusOf(c, [0.8448, 0.8484, 0.851, 0.8556, 0.8664], "median").status).toBe("not_reproduced"); // one example further is outside
+    expect(statusOf({ ...c, value: 0.7625, std: 0 }, [0.7476], "mean").status).toBe("not_reproduced"); // 4 decimals: 0.00005, not 0.0005
     // LoRA r3: the timeout's SIGTERM makes torch.distributed's launcher print a traceback; training was running.
     const sig = "epoch 0 step 10\nTraceback (most recent call last):\n  File \"run.py\", line 709, in run\n    time.sleep(monitor_interval)\ntorch.distributed.elastic.multiprocessing.api.SignalException: Process 12 got signal: 15\n";
     expect(smokeVerdict(124, sig)).toMatchObject({ ok: true });

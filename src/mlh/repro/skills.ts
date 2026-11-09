@@ -492,7 +492,12 @@ export function statusOf(c: Claim, values: number[], aggregate: "mean" | "median
   const sorted = [...values].sort((a, b) => a - b), median = n % 2 ? sorted[(n - 1) / 2]! : (sorted[n / 2 - 1]! + sorted[n / 2]!) / 2;
   const mean = aggregate === "median" ? median : avg; // the paper's own aggregate (the field keeps its name)
   const std = n > 1 ? Math.sqrt(values.reduce((a, b) => a + (b - avg) ** 2, 0) / (n - 1)) : 0;
-  const tol = Math.max(0.01, 2 * (c.std ?? 0), n > 1 ? 2 * std / Math.sqrt(n) : 0);
+  // Plus the paper's own rounding: a claim printed as 86.6 lies anywhere in [86.55, 86.65], half a unit of its last
+  // digit (at least 3 decimals as a fraction: 42.0 AP is stored as 0.42). Owner decision after LoRA RTE r3, whose
+  // median (236/277 = 0.85199) missed 0.866 by 0.00001 against 2 x the paper's std; applied to every paper, and
+  // no other recorded verdict changes.
+  const dec = Math.max(String(c.value).split(".")[1]?.length ?? 0, 3), rounding = 0.5 * 10 ** -dec;
+  const tol = Math.max(0.01, 2 * (c.std ?? 0), n > 1 ? 2 * std / Math.sqrt(n) : 0) + rounding;
   return { status: Math.abs(mean - c.value) <= tol ? "reproduced" : "not_reproduced", mean, std, tol };
 }
 
