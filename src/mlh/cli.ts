@@ -111,6 +111,15 @@ async function main(): Promise<void> {
       console.log(ev.map((e) => `${e.t} ${"id" in e ? e.id : ""}`).join("\n") || "nothing to reopen");
       break;
     }
+    case "raise-budget": {
+      // mlh raise-budget <runDir> <usd> <reason>: the owner's raise of one paper's GPU budget, recorded with its reason.
+      const [runDir, usd, ...why] = positional;
+      if (!(Number(usd) > 0) || !why.length || !existsSync(join(runDir!, "run.json"))) throw new Error("usage: mlh raise-budget <runDir> <usd> <reason>");
+      const { appendFileSync: af } = await import("node:fs");
+      af(join(runDir!, "budget-raises.jsonl"), JSON.stringify({ at: new Date().toISOString(), usd: Number(usd), reason: why.join(" ") }) + "\n");
+      console.log(`raised by $${Number(usd)}; takes effect when the run (re)starts`);
+      break;
+    }
     case "excuse": {
       // mlh excuse <runDir> <node> <reason>: journaled operator ruling that the node's outcome came from a
       // harness defect (name the fix), so it is no evidence about the agent's trust. Changes no result.

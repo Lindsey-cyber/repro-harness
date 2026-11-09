@@ -127,7 +127,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const concurrency = mode === "repro" ? 1 : o.concurrency ?? 3;
   let completedHere = 0, retried = 0, attemptsHere = 0, llmTotal = zeroUsage();
   const runMeta = JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")) as { arxiv?: string; approvePolicy?: "none" | "medium" | "all"; gpuBudgetUsd?: number };
-  const gpuBudget = runMeta.gpuBudgetUsd ?? o.gpuBudgetUsd;
+  // run.json fixes the run's identity (its hash names the volume), so a raise is not written there: the
+  // owner's raises are appended to budget-raises.jsonl, each with its reason, and add to the limit.
+  const base = runMeta.gpuBudgetUsd ?? o.gpuBudgetUsd, gpuBudget = base ? base + budgetRaises(runDir) : base;
   const repro = mode === "repro" ? {
     arxiv: runMeta.arxiv ?? o.arxiv ?? "",
     approvePolicy: runMeta.approvePolicy ?? o.approvePolicy ?? "medium",
@@ -303,4 +305,10 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   writeFileSync(join(runDir, "summary.json"), JSON.stringify(summary, null, 1));
   writeFileSync(join(runDir, "context.txt"), compact(state));
   return { state, summary, reportPath, stats: { sandboxRuns: stats.runs, sandboxMs: Math.round(stats.ms), wallMs: Math.round(performance.now() - t0), attempts: attemptsHere, retried, llm: llmTotal } };
+}
+
+export function budgetRaises(runDir: string): number {
+  const f = join(runDir, "budget-raises.jsonl");
+  if (!existsSync(f)) return 0;
+  return readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => Number((JSON.parse(l) as { usd?: unknown }).usd)).filter((x) => Number.isFinite(x) && x > 0).reduce((a, b) => a + b, 0);
 }
