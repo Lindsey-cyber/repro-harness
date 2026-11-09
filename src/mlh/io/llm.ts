@@ -119,7 +119,8 @@ export async function jsonVia<T>(m: Pick<Llm, "chat">, system: string, user: str
 }
 
 // A per-node view of a model that counts only that node's usage.
-export function meter(m: Pick<Llm, "model" | "chat">): Pick<Llm, "model" | "usage" | "chat" | "json"> {
+// onCall sees every call as it happens (the harness journals it, so a killed process loses none).
+export function meter(m: Pick<Llm, "model" | "chat">, onCall?: (u: Usage) => void): Pick<Llm, "model" | "usage" | "chat" | "json"> {
   const usage = zeroUsage();
   const view = {
     model: m.model,
@@ -127,6 +128,7 @@ export function meter(m: Pick<Llm, "model" | "chat">): Pick<Llm, "model" | "usag
     async chat(...a: Parameters<Llm["chat"]>) {
       const r = await m.chat(...a);
       Object.assign(usage, addUsage(usage, r.usage));
+      onCall?.(r.usage);
       return r;
     },
     json<T>(system: string, user: string, maxTokens = 4000): Promise<T> { return jsonVia<T>(view, system, user, maxTokens); },

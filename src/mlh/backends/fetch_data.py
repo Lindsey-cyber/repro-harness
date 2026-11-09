@@ -13,7 +13,7 @@ import tarfile
 import urllib.request
 import zipfile
 
-MARKS = "/cache/.mlh-fetch"
+MARKS = os.environ.get("MLH_FETCH_MARKS", "/cache/.mlh-fetch")  # override only for offline tests
 
 
 def count_files(path):

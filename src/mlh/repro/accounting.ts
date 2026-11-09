@@ -42,7 +42,8 @@ const add = (b: Bucket, llm: number, gpu: number, ms: number) => { b.llmUsd += l
 
 // rows: the run's trace.jsonl; byAttempt: budget.json's Modal spend per "<id>#<attempt>";
 // messages: the failure message per "<id>#<attempt>" from the journal (for the class table).
-export function costReport(rows: TraceRow[], byAttempt: Record<string, number> = {}, messages: Record<string, string> = {}): CostReport {
+// llmByAttempt: LLM spend per attempt from llm-calls.jsonl, which also covers attempts killed mid-way.
+export function costReport(rows: TraceRow[], byAttempt: Record<string, number> = {}, messages: Record<string, string> = {}, llmByAttempt: Record<string, number> = {}): CostReport {
   const r: CostReport = { productive: empty(), retried: classes(), failed: classes(), killed: empty(), unattributed: empty(), totalUsd: 0, wasteShare: 0 };
   const succeeded = new Set(rows.filter((x) => x.outcome === "ok").map((x) => x.id));
   const seen = new Set<string>();
@@ -54,6 +55,7 @@ export function costReport(rows: TraceRow[], byAttempt: Record<string, number> =
     else if (x.outcome === "fail") add((succeeded.has(x.id) ? r.retried : r.failed)[failureClass(x.category, x.id, messages[key])], llm, gpu, ms);
   }
   for (const [k, usd] of Object.entries(byAttempt)) if (!seen.has(k)) add(k.startsWith("(") ? r.unattributed : r.killed, 0, usd, 0);
+  for (const [k, usd] of Object.entries(llmByAttempt)) if (!seen.has(k) && usd > 0) { r.killed.llmUsd += usd; r.killed.usd += usd; }
   const all = [r.productive, r.killed, r.unattributed, ...Object.values(r.retried), ...Object.values(r.failed)];
   r.totalUsd = all.reduce((a, b) => a + b.usd, 0);
   // Unattributed spend is unknown, not waste: it is left out of the share and shown on its own.

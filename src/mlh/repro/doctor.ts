@@ -11,7 +11,7 @@ import { IMAGES } from "./gpu.ts";
 export interface Check { name: string; ok: boolean; detail: string }
 export interface Doctor { at: string; ok: boolean; checks: Check[] }
 
-const ROOT = resolve(import.meta.dirname, "../../..");
+const ROOT = process.env.MLH_ROOT ? resolve(process.env.MLH_ROOT) : resolve(import.meta.dirname, "../../..");
 const FILE = join(ROOT, ".mlh", "doctor.json");
 
 // "py3.8-torch1.12-cu113" -> { py: "3.8", torch: "1.12" }. Pure.

@@ -102,3 +102,11 @@ describe("Modal ledger", () => {
     expect(readFileSync(join(root, "c2", "lora", "run.json"), "utf8")).toContain("x");
   });
 });
+
+describe("LLM spend of a killed attempt", () => {
+  it("is counted from the per-call log, as killed", () => {
+    const r = costReport([{ id: "repro.env", attempt: 2, outcome: "ok", costUsd: 0.05 }], {}, {}, { "repro.env#1": 0.03, "repro.env#2": 0.05 });
+    expect(r.killed.llmUsd).toBeCloseTo(0.03);
+    expect(r.productive.llmUsd).toBeCloseTo(0.05);
+  });
+});

@@ -192,7 +192,8 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     const started = performance.now(), before = { ...stats };
     const saved: { name: string; sha256: string; bytes: number }[] = [];
     let label = 0;
-    const models = o.llm ? { proposer: meter(o.llm.proposer), reviewer: meter(o.llm.reviewer) } : undefined;
+    const callLog = (u: Usage) => appendFileSync(join(runDir, "llm-calls.jsonl"), JSON.stringify({ key: `${n.id}#${attempt}`, costUsd: u.costUsd, tokens: u.promptTokens + u.completionTokens }) + "\n");
+    const models = o.llm ? { proposer: meter(o.llm.proposer, callLog), reviewer: meter(o.llm.reviewer, callLog) } : undefined;
     const ctx: SkillCtx = {
       ...(models ? { llm: models } : {}),
       workDir: () => join(runDir, "work", n.id.replace(/[^\w.-]+/g, "_")),

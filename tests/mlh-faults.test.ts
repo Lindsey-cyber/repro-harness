@@ -163,3 +163,60 @@ describe("P1: strictly sequential", () => {
     expect(claims(ws.runDir)).toEqual(CLEAN);
   }, 60_000);
 });
+
+describe("P1: debugger and patch path", () => {
+  it("a planned command that fails is diagnosed, the corrected command is authorized, re-run and reproduces", async () => {
+    const ws = workspace();
+    const s = canaryScript();
+    const plan = structuredClone(s.plan[0]!.args) as { stages: { argv: string[] }[] };
+    plan.stages[0]!.argv = ["python3", "train.py", "--stepz", "100"];
+    s.plan = [{ name: "report", args: plan }];
+    s.debug = [{ name: "report", args: { causes: [{ category: "run.wrong_command", evidence: "train.py: error: unrecognized arguments: --stepz 100" }], patch_intent: "", run_argv: ["python3", "train.py", "--steps", "100"], expected_effect: "the stage runs" } }];
+    await run(ws, s);
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+    const j = journal(ws.runDir);
+    expect(j.some((e) => e.t === "ok" && String(e.id).startsWith("repro.patch") && e.output.accepted === true)).toBe(true);
+    expect(roleOutcomes(j).debugger).toMatchObject({ ok: true });
+    expect(costOfRun(ws.runDir).retried.paper.attempts + costOfRun(ws.runDir).failed.paper.attempts).toBeGreaterThan(0);
+  }, 60_000);
+});
+
+describe("P1: data fetch path", () => {
+  const URL = "https://huggingface.co/datasets/canary/resolve/main/labels.txt"; // an approved data host
+  const BODY = "0 1 0 1 0 1 0 1 0 1";
+  const withData = () => {
+    const s = canaryScript();
+    const plan = structuredClone(s.plan[0]!.args) as Record<string, unknown> & { stages: { argv: string[] }[] };
+    plan.stages[0]!.argv = ["python3", "train.py", "--steps", "100", "--data", "/cache/data/canary/labels.txt"];
+    plan.fetch = [{ url: URL, to: "/cache/data/canary/labels.txt" }];
+    plan.checks = [{ path: "/cache/data/canary", minFiles: 1 }];
+    s.plan = [{ name: "report", args: plan }];
+    return s;
+  };
+  it("declared data is fetched once with provenance, the stage reads it, and the claim reproduces", async () => {
+    const ws = workspace();
+    ws.env.MLH_FAKE_DATA = JSON.stringify({ [URL]: BODY });
+    await run(ws, withData());
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+    const fetched = journal(ws.runDir).find((e) => e.t === "ok" && e.id === "repro.fetch");
+    expect(fetched.output.items[0]).toMatchObject({ url: URL, bytes: BODY.length, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(fetched.output.checks[0]).toMatchObject({ ok: true });
+  }, 60_000);
+  it("data from a host that is not approved is held for a human, never fetched", async () => {
+    const ws = workspace();
+    const s = withData();
+    const plan = s.plan[0]!.args as { fetch: { url: string }[] };
+    plan.fetch[0]!.url = "https://data.example.org/canary/labels.txt";
+    ws.env.MLH_FAKE_DATA = JSON.stringify({ "https://data.example.org/canary/labels.txt": BODY });
+    await run(ws, s);
+    expect(journal(ws.runDir).find((e) => e.t === "hold" && e.id === "repro.fetch")?.reason).toMatch(/data\.example\.org/);
+    expect(existsSync(join(ws.env.MLH_FAKE_CACHE!, "data"))).toBe(false);
+  }, 60_000);
+  it("a download that fails is a named failure, not a silent pass", async () => {
+    const ws = workspace();
+    ws.env.MLH_FAKE_DATA = "{}";
+    await run(ws, withData());
+    expect(claims(ws.runDir)[0]![1]).not.toBe("reproduced");
+    expect(journal(ws.runDir).some((e) => e.t === "fail" && e.id === "repro.fetch")).toBe(true);
+  }, 60_000);
+});

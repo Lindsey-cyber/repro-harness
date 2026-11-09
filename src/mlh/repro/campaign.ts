@@ -13,7 +13,9 @@ import { emptyStore, record, renderTrust, roleOutcomes, scaleGate, type TrustSto
 
 export interface Paper { id: string; arxiv: string; repo: string; commit: string; objective: string; budgetUsd?: number }
 
-const ROOT = resolve(import.meta.dirname, "../../..");
+// CODE: this checkout; ROOT: where run state lives (.mlh/...), MLH_ROOT for hermetic tests.
+const CODE = resolve(import.meta.dirname, "../../..");
+const ROOT = process.env.MLH_ROOT ? resolve(process.env.MLH_ROOT) : CODE;
 
 async function prepare(p: Paper): Promise<string> {
   const dir = join(ROOT, ".mlh", "complex-src", p.id);
@@ -26,7 +28,7 @@ async function prepare(p: Paper): Promise<string> {
   }
   const tmp = `${dir}.tmp`;
   rmSync(tmp, { recursive: true, force: true });
-  let r = await runProc(["git", "clone", "--quiet", p.repo, tmp], { cwd: ROOT, env, timeoutMs: 600_000 });
+  let r = await runProc(["git", "clone", "--quiet", p.repo, tmp], { cwd: CODE, env, timeoutMs: 600_000 });
   if (r.code !== 0) throw new Error(`clone ${p.repo}: ${r.stderr.slice(-300)}`);
   r = await runProc(["git", "checkout", "--quiet", p.commit], { cwd: tmp, env, timeoutMs: 120_000 });
   if (r.code !== 0) throw new Error(`checkout ${p.commit}: ${r.stderr.slice(-300)}`);
@@ -70,17 +72,21 @@ export function lastProgressMs(runDir: string): number {
 }
 
 function runChild(args: string[], runDir: string, log: string): Promise<{ code: number | null; killedForStall: boolean }> {
-  const child = startProc(["npx", "tsx", join(ROOT, "src/mlh/cli.ts"), ...args], { cwd: ROOT, env: process.env, onOutput: (d) => appendFileSync(log, d) });
+  // MLH_CAMPAIGN_CHILD replaces the child command (tests run a scripted team instead of the CLI).
+  const cmd = process.env.MLH_CAMPAIGN_CHILD ? process.env.MLH_CAMPAIGN_CHILD.split(" ") : ["npx", "tsx", join(CODE, "src/mlh/cli.ts")];
+  const child = startProc([...cmd, ...args], { cwd: CODE, env: process.env, onOutput: (d) => appendFileSync(log, d) });
+  const started = Date.now();
   let killed = false;
   const timer = setInterval(() => {
-    const last = lastProgressMs(runDir);
-    const age = last ? Date.now() - last : 0;
-    if (age > allowedSilenceMs(runDir)) {
+    // A child that hangs before its first journal write is measured from its start, not exempt.
+    const last = Math.max(lastProgressMs(runDir), started);
+    const age = Date.now() - last;
+    if (age > (process.env.MLH_STALL_MS ? Number(process.env.MLH_STALL_MS) : allowedSilenceMs(runDir))) {
       killed = true;
       appendFileSync(log, `\n[watchdog] no progress for ${Math.round(age / 60000)} min: killing for resume\n`);
       child.kill();
     }
-  }, 60_000);
+  }, Number(process.env.MLH_WATCHDOG_MS ?? 60_000));
   return child.done.then((code) => { clearInterval(timer); return { code, killedForStall: killed }; });
 }
 
@@ -170,7 +176,9 @@ export function costOfRun(runDir: string): CostReport {
     if (e.t === "start" && e.id) attempts[e.id] = e.attempt ?? 1;
     if (e.t === "fail" && e.id) messages[`${e.id}#${attempts[e.id] ?? 1}`] = e.message ?? "";
   }
-  return costReport(rows, byAttempt, messages);
+  const llm: Record<string, number> = {};
+  if (existsSync(join(runDir, "llm-calls.jsonl"))) for (const l of readFileSync(join(runDir, "llm-calls.jsonl"), "utf8").split("\n").filter(Boolean)) { try { const c = JSON.parse(l) as { key: string; costUsd: number }; llm[c.key] = (llm[c.key] ?? 0) + (c.costUsd || 0); } catch { /* torn last line */ } }
+  return costReport(rows, byAttempt, messages, llm);
 }
 
 export function costOfRound(label: string): string {
@@ -261,11 +269,13 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
         const src = await prepare(p);
         // The solo baseline has no journal to resume from: one attempt, as a single agent would get.
         if (o.mode === "solo") { await runChild(["solo", src, "--arxiv", p.arxiv, "--objective", p.objective, "--gpu-budget", String(p.budgetUsd ?? 5), "--run-dir", runDir], runDir, log); }
-        let r = o.mode === "solo" ? { code: 0, killedForStall: false } : await runChild(existsSync(join(runDir, "journal.jsonl")) ? ["resume", runDir, "--llm"] : ["repro", src, "--arxiv", p.arxiv, "--objective", p.objective, "--llm", "--gpu-budget", String(p.budgetUsd ?? 5), "--run-dir", runDir], runDir, log);
+        // A child that died before its journal existed is started again, not "resumed" (there is nothing to resume).
+        const launch = () => (existsSync(join(runDir, "journal.jsonl")) ? ["resume", runDir, "--llm"] : ["repro", src, "--arxiv", p.arxiv, "--objective", p.objective, "--llm", "--gpu-budget", String(p.budgetUsd ?? 5), "--run-dir", runDir]);
+        let r = o.mode === "solo" ? { code: 0, killedForStall: false } : await runChild(launch(), runDir, log);
         // Killed for a stall or crashed: resume from the journal (at most twice).
         while (o.mode !== "solo" && (r.killedForStall || r.code !== 0) && !existsSync(join(runDir, "stopped.json")) && resumes < 2) {
           resumes++;
-          r = await runChild(["resume", runDir, "--llm"], runDir, log);
+          r = await runChild(launch(), runDir, log);
         }
       } catch (e) {
         appendFileSync(log, `\n[campaign] ${String(e)}\n`);

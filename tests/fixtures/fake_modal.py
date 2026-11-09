@@ -18,6 +18,11 @@ def main():
         return {"ok": False, "error": f"fake runner: op {req['op']} not supported"}
     cmd = req["cmd"]
     text = " ".join(cmd)
+    if "MLH_PROBE" in text:
+        real = {"2.5.1-cuda12.4": ("3.11.10", "2.5.1"), "2.1.2-cuda12.1": ("3.10.13", "2.1.2"), "1.13.1-cuda11.6": ("3.10.8", "1.13.1"),
+                "1.12.1-cuda11.3": ("3.7.13", "1.12.1"), "1.9.1-cuda11.1": ("3.7.11", "1.10.0"), "1.7.1-cuda11.0": ("3.8.5", "1.7.1")}
+        v = next((v for k, v in real.items() if k in (req.get("image") or "")), None)
+        return {"ok": True, "exit_code": 0 if v else 1, "stdout": f"MLH_PROBE py={v[0]} torch={v[1]}\n" if v else "", "stderr": "", "elapsed_s": 5, "files": {}}
     os.makedirs(cache, exist_ok=True)
     counts_file = os.path.join(cache, ".fake-counts.json")
     counts = json.load(open(counts_file)) if os.path.exists(counts_file) else {}
@@ -41,8 +46,19 @@ def main():
             if os.path.exists(src):
                 shutil.rmtree(dst, ignore_errors=True); shutil.copytree(src, dst) if os.path.isdir(src) else shutil.copy(src, dst)
         env = {**os.environ, **{k: m(str(v)) for k, v in (req.get("env") or {}).items()}}
+        argv = [m(a) for a in cmd]
+        if len(argv) > 1 and argv[1] == "fetch_data.py":
+            # The real fetch script, with downloads served from MLH_FAKE_DATA ({url: text}) and markers in the fake cache.
+            env["MLH_FETCH_MARKS"] = os.path.join(cache, ".mlh-fetch")
+            shim = ("import io, json, os, runpy, sys, urllib.request\n"
+                    "data = json.loads(os.environ.get('MLH_FAKE_DATA', '{}'))\n"
+                    "class R(io.BytesIO):\n    def __enter__(self): return self\n    def __exit__(self, *a): return False\n"
+                    "def urlopen(req, timeout=None):\n    url = req.full_url if hasattr(req, 'full_url') else req\n"
+                    "    if url not in data: raise OSError('fake: no such url ' + url)\n    return R(data[url].encode())\n"
+                    "urllib.request.urlopen = urlopen\nsys.argv = sys.argv[1:]\nrunpy.run_path('fetch_data.py', run_name='__main__')\n")
+            argv = [argv[0], "-c", shim] + argv[1:]
         try:
-            p = subprocess.run([m(a) for a in cmd], cwd=work, env=env, capture_output=True, text=True, timeout=int(req.get("timeout_s", 600)))
+            p = subprocess.run(argv, cwd=work, env=env, capture_output=True, text=True, timeout=int(req.get("timeout_s", 600)))
             code, out, err = p.returncode, p.stdout, p.stderr
         except subprocess.TimeoutExpired:
             code, out, err = 124, "", "timeout"
