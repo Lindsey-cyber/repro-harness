@@ -1,2 +1,3 @@
 {"label":"p5detr-clean1","at":"2026-11-09T04:22:30.123Z","success":0,"n":1,"medianMin":10,"gpuUsd":0.04,"llmUsd":0.04,"blockedBy":["claims","env","planner","debugger"],"topFailure":"experiment_error"}
 {"label":"r2c","at":"2026-11-09T10:27:41.913Z","success":0,"n":1,"medianMin":18,"gpuUsd":0.79,"llmUsd":0.1,"blockedBy":["claims","env","planner","debugger"],"topFailure":"experiment_error"}
+{"label":"r3","at":"2026-11-09T18:39:40.303Z","success":1,"n":1,"medianMin":29,"gpuUsd":5.14,"llmUsd":0.14,"blockedBy":["claims","env","planner","debugger"],"topFailure":"provider_transient"}
