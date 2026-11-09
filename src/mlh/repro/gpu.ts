@@ -135,7 +135,9 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     for (const ref of [...st.argv, ...Object.values(st.env ?? {})].flatMap((a) => a.match(/\/cache\/[\w./-]+/g) ?? [])) {
       if (ref.startsWith("/cache/runs/")) continue;
       const under = (a: string, b: string) => a === b || a.startsWith(b.endsWith("/") ? b : `${b}/`);
-      if (!fetch.some((f) => under(ref.replace(/\/$/, ""), f.to.replace(/\/$/, "")))) errors.push(`${st.id}: ${ref} is not produced by any fetch item; declare where it comes from (fetch: [{url, to: "/cache/data/..."}])`);
+      // A fetched file, a path inside a fetched archive, or a directory the fetch items fill.
+      const r0 = ref.replace(/\/$/, "");
+      if (!fetch.some((f) => { const t = f.to.replace(/\/$/, ""); return under(r0, t) || under(t, r0); })) errors.push(r0.startsWith("/cache/data/") ? `${st.id}: ${ref} is not produced by any fetch item; declare where it comes from (fetch: [{url, to: "/cache/data/..."}])` : `${st.id}: ${ref} is not produced by any fetch item: inputs go under /cache/data/ via fetch items; write outputs (logs, checkpoints) under /cache/runs/`);
     }
   }
   const unknownHosts = [...new Set(fetch.map((f) => new URL(f.url).hostname).filter((h) => !DATA_HOSTS.some((d) => h === d || h.endsWith(`.${d}`))))];
