@@ -1,0 +1,30 @@
+{
+ "claims": {
+  "level": "probation",
+  "n": 0,
+  "ok": 0,
+  "lower": 0,
+  "history": []
+ },
+ "env": {
+  "level": "probation",
+  "n": 0,
+  "ok": 0,
+  "lower": 0,
+  "history": []
+ },
+ "planner": {
+  "level": "probation",
+  "n": 0,
+  "ok": 0,
+  "lower": 0,
+  "history": []
+ },
+ "debugger": {
+  "level": "probation",
+  "n": 0,
+  "ok": 0,
+  "lower": 0,
+  "history": []
+ }
+}
