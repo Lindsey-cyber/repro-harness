@@ -75,6 +75,31 @@ async function main(): Promise<void> {
       console.log(costOfRound(positional[0]!));
       break;
     }
+    case "operator-patch": {
+      // mlh operator-patch <runDir> <stage> <reason> -- <argv...>: a human-approved change of one stage's
+      // command, journaled as an accepted high-risk patch with a human basis; only that stage (and what it
+      // needs, and its claims) re-runs. Running debuggers for that stage's claims are skipped.
+      const { replay, apply } = await import("./core/dag.ts");
+      const flow = await import("./repro/flow.ts");
+      const { readFileSync: rf, appendFileSync: af } = await import("node:fs");
+      const dd = process.argv.indexOf("--");
+      if (dd < 0) throw new Error("usage: mlh operator-patch <runDir> <stage> <reason> -- <argv...>");
+      const [runDir, stage, ...why] = process.argv.slice(3, dd), argv = process.argv.slice(dd + 1);
+      const j = `${runDir}/journal.jsonl`;
+      const st = replay(rf(j, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)), 3);
+      const at = new Date().toISOString(), ev: unknown[] = [];
+      const push = (e: never) => { apply(st, e); ev.push(e); };
+      for (const id of st.order) { const ns = st.nodes.get(id)!; if (ns.node.skill === "repro.debug" && ns.status !== "succeeded" && ns.status !== "skipped") push({ t: "skip", at, id, reason: `operator: superseded by an approved change (${why.join(" ")})` } as never); }
+      const k = st.order.filter((x) => x.startsWith("repro.patch")).length + 1;
+      const pid = `repro.patch:stage-${stage}:operator${k}`;
+      push({ t: "node", at, node: { id: pid, skill: "repro.patch", deps: [], purpose: "setup", params: { claim: `stage-${stage}`, from: 0, debug: "" } }, why: "operator" } as never);
+      push({ t: "start", at, id: pid, attempt: 1 } as never);
+      push({ t: "ok", at, id: pid, output: { accepted: true, risk: "high", reasons: [why.join(" ")], basis: `human approval: ${why.join(" ")}`, argv: { [`stage-${stage}`]: argv } }, findings: [], artifacts: [] } as never);
+      for (const node of flow.afterOk(st, pid)) if (!st.nodes.has(node.id)) push({ t: "node", at, node, why: `after ${pid}` } as never);
+      for (const e of ev) af(j, JSON.stringify(e) + "\n");
+      console.log((ev as { t: string; id?: string; node?: { id: string } }[]).map((e) => `${e.t} ${e.id ?? e.node?.id ?? ""}`).join("\n"));
+      break;
+    }
     case "reopen": {
       // mlh reopen <runDir> <id-prefix> <reason>: journaled operator correction after a harness fix.
       const { replay, reopenByOperator } = await import("./core/dag.ts");
