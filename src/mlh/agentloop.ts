@@ -85,7 +85,21 @@ const DEFS: Record<Exclude<ToolName, never>, ToolDef> = {
 
 const safePath = (root: string, p: string) => { const a = resolve(root, p || "."); if (a !== root && !a.startsWith(root + "/")) throw new Error("path outside the repository"); return a; };
 
-export const writesData = (cmd: string) => /\/cache\/data\b/.test(cmd) && /\b(mkdir|curl|wget|cp|mv|rsync|tar|unzip|gunzip|ln|touch|tee|rm|urlretrieve|urlopen|requests\.get|snapshot_download|hf_hub_download|save_pretrained|open\([^)]*["']w)|>{1,2}\s*\S*\/cache\/data|cd\s+\/cache\/data/.test(cmd);
+// Judged per simple command (split on ; && || | and newlines), so reading the data while writing logs
+// elsewhere in the same line is allowed (SimSiam r3: "mkdir -p /tmp/logs && python main.py --data_dir
+// /cache/data/cifar10" was refused, and the planner dodged the rule with /cache/d*). A glob that can
+// match /cache/data counts as /cache/data. cp/rsync/ln write only their last argument.
+const DATA = /\/cache\/(data\b|d[\w]*[*?[]|[*?[])/;
+const WRITE = /\b(mkdir|curl|wget|cp|mv|rsync|tar|unzip|gunzip|ln|touch|tee|rm|urlretrieve|urlopen|requests\.get|snapshot_download|hf_hub_download|save_pretrained|open\([^)]*["']w)\b|>{1,2}\s*\S/;
+export const writesData = (cmd: string) => /\/cache\/(d\w*)?[*?[]/.test(cmd) // a glob over /cache: name the path exactly
+  || (/(=|\$\()[^;&|\n]*\/cache\/data\b/.test(cmd) && WRITE.test(cmd)) // a /cache/data path held in a variable, then a write anywhere
+  || cmd.split(/;|&&|\|\||\||\n/).some((seg) => {
+  if (!DATA.test(seg)) return false;
+  if (/\bcd\s+\S*\/cache\/d/.test(seg) || />{1,2}\s*\S*\/cache\/d/.test(seg)) return true;
+  const copy = /\b(cp|rsync|ln)\b\s+(.*)$/.exec(seg);
+  if (copy) { const args = copy[2]!.trim().split(/\s+/).filter((a) => !a.startsWith("-")); return DATA.test(args.at(-1) ?? ""); }
+  return /\b(mkdir|curl|wget|mv|tar|unzip|gunzip|touch|tee|rm|urlretrieve|urlopen|requests\.get|snapshot_download|hf_hub_download|save_pretrained|open\([^)]*["']w)/.test(seg);
+});
 export const backgrounds = (cmd: string) => /\b(nohup|setsid|disown)\b|&\s*($|;|\n|\))|\bscreen\s+-d|\btmux\b/.test(cmd.replace(/&&/g, "").replace(/2>&1|>&\d/g, ""));
 
 export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
@@ -175,7 +189,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             // A per-command time limit cannot be escaped by backgrounding (P5: an env agent ran DETR's full
             // evaluation with nohup and polled its log, 5 min at a time).
             // /cache/data holds declared, checksummed downloads only (LoRA r3: the planner curl'ed roberta-base there).
-            if (o.remote && writesData(String(args.command))) { out = "refused: /cache/data holds declared downloads only; declare data as fetch items (the env agent: use fetch_data); write scratch files under /tmp or /cache/runs"; break; }
+            if (o.remote && writesData(String(args.command))) { out = "refused: this command writes into /cache/data, or names it through a glob or a variable. /cache/data holds declared downloads only (the env agent: use fetch_data). Reading it is allowed: name the path exactly (e.g. --data_dir /cache/data/<name>) and write logs and scratch files under /tmp or /cache/runs"; break; }
             if (o.role.maxRunS && backgrounds(String(args.command))) { out = `refused: background processes (nohup, setsid, a trailing &) are not allowed; each command is limited to ${o.role.maxRunS} s and must finish within it`; break; }
             if (o.remote) {
               const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;
