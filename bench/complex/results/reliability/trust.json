@@ -1,24 +1,45 @@
 {
  "claims": {
   "level": "probation",
-  "n": 0,
-  "ok": 0,
-  "lower": 0,
-  "history": []
+  "n": 1,
+  "ok": 1,
+  "lower": 0.20654329147389294,
+  "history": [
+   {
+    "at": "2026-11-09T04:22:30.097Z",
+    "paper": "p5detr-clean1/detr",
+    "ok": true,
+    "why": "every extracted number is in the PDF"
+   }
+  ]
  },
  "env": {
   "level": "probation",
-  "n": 0,
-  "ok": 0,
-  "lower": 0,
-  "history": []
+  "n": 1,
+  "ok": 1,
+  "lower": 0.20654329147389294,
+  "history": [
+   {
+    "at": "2026-11-09T04:22:30.097Z",
+    "paper": "p5detr-clean1/detr",
+    "ok": true,
+    "why": "smoke test passed on the agent's own report"
+   }
+  ]
  },
  "planner": {
   "level": "probation",
-  "n": 0,
-  "ok": 0,
-  "lower": 0,
-  "history": []
+  "n": 1,
+  "ok": 1,
+  "lower": 0.20654329147389294,
+  "history": [
+   {
+    "at": "2026-11-09T04:22:30.097Z",
+    "paper": "p5detr-clean1/detr",
+    "ok": true,
+    "why": "plan accepted"
+   }
+  ]
  },
  "debugger": {
   "level": "probation",

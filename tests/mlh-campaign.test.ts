@@ -22,7 +22,7 @@ function campaign(stallOnce: boolean) {
   writeFileSync(cfg, JSON.stringify([{ id: "canary", arxiv: "2101.00001", repo: dir, commit, objective: "Reproduce the canary accuracy.", budgetUsd: 1 }]));
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>), MLH_ROOT: root, MLH_CAMPAIGN_CHILD: `npx tsx ${resolve("tests/helpers/campaign-child.mts")}`,
-    MLH_MODAL_RUNNER: FAKE_RUNNER, MLH_FAKE_CACHE: join(root, "cache"), MLH_FAKE_ELAPSED: "60", MLH_ENV_CACHE: join(root, "env-cache"), MLH_BACKOFF_MS: "0",
+    MLH_MODAL_RUNNER: FAKE_RUNNER, MLH_FAKE_CACHE: join(root, "cache"), MLH_FAKE_ELAPSED: "60", MLH_ENV_CACHE: join(root, "env-cache"), MLH_BACKOFF_MS: "0", MLH_SKIP_URL_PROBE: "1",
     MLH_STALL_MS: "4000", MLH_WATCHDOG_MS: "500", ...(stallOnce ? { MLH_TEST_STALL_ONCE: join(root, "stalled") } : {}),
   };
   delete env.DEEPSEEK_API_KEY; // the scripted team needs no provider; the balance check is skipped as unknown

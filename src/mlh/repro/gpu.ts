@@ -135,7 +135,10 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   const fetch: FetchItem[] = [];
   for (const f of (r as { fetch?: Partial<FetchItem>[] }).fetch ?? []) {
     let host = "";
-    try { const u = new URL(String(f.url)); if (u.protocol !== "https:") throw new Error(); host = u.hostname; } catch { errors.push(`fetch url ${f.url} must be https`); continue; }
+    // https, or plain http with a sha256: the checksum (verified by fetch_data.py) guarantees integrity
+    // whatever the transport. Some data hosts serve only http (images.cocodataset.org's certificate
+    // does not match its name; forcing https made a planner write an unusable URL, P5 run 1).
+    try { const u = new URL(String(f.url)); if (u.protocol !== "https:" && !(u.protocol === "http:" && typeof f.sha256 === "string" && /^[0-9a-f]{64}$/i.test(f.sha256))) throw new Error(); host = u.hostname; } catch { errors.push(`fetch url ${f.url} must be https, or http with its sha256`); continue; }
     const to = String(f.to ?? "");
     if (!to.startsWith("/cache/data/") || to.includes("..")) { errors.push(`fetch target ${to} must be under /cache/data/`); continue; }
     fetch.push({ url: String(f.url), to, ...(typeof f.sha256 === "string" && /^[0-9a-f]{64}$/i.test(f.sha256) ? { sha256: f.sha256 } : {}), ...(f.unpack === "zip" || f.unpack === "tar" ? { unpack: f.unpack } : {}) });

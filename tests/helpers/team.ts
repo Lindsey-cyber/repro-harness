@@ -63,7 +63,7 @@ export function workspace(faults: unknown[] = []): { runDir: string; env: Record
   const runDir = join(root, "run");
   mkdirSync(join(runDir, "work", "repro.paper"), { recursive: true });
   writeFileSync(join(runDir, "work", "repro.paper", "paper.pdf"), canaryPdf("Canary model: test accuracy of 90.0% on the synthetic task."));
-  return { runDir, env: { MLH_MODAL_RUNNER: FAKE_RUNNER, MLH_FAKE_CACHE: join(root, "cache"), MLH_FAKE_FAULTS: JSON.stringify(faults), MLH_FAKE_ELAPSED: "60", MLH_ENV_CACHE: join(root, "env-cache"), MLH_BACKOFF_MS: "0" } };
+  return { runDir, env: { MLH_MODAL_RUNNER: FAKE_RUNNER, MLH_FAKE_CACHE: join(root, "cache"), MLH_FAKE_FAULTS: JSON.stringify(faults), MLH_FAKE_ELAPSED: "60", MLH_ENV_CACHE: join(root, "env-cache"), MLH_BACKOFF_MS: "0", MLH_SKIP_URL_PROBE: "1" } };
 }
 
 export const withEnv = async <T>(env: Record<string, string>, f: () => Promise<T>): Promise<T> => {

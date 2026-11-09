@@ -13,10 +13,13 @@ log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$out/$prefix.log"; }
 campaign() { MLH_ENV_CACHE=".mlh/env-cache-$1" npx tsx src/mlh/cli.ts campaign "$config" --label "$1" --parallel 1 --out "$out" >> ".mlh/campaign-$1.log" 2>&1; }
 journal() { cat .mlh/campaign/"$1"/*/journal.jsonl 2>/dev/null; }
 stopped() { [ -f ".mlh/campaign/$1/stopped" ] || ls .mlh/campaign/"$1"/*/stopped.json >/dev/null 2>&1; }
+# A run whose claims did not all get a definitive verdict fails the baseline: stop and investigate.
+definitive() { python3 -c "import json,sys; r=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]; sys.exit(0 if r and all(c['status'] in ('reproduced','not_reproduced') for x in r for c in x['claims']) else 1)" "$out/$1.jsonl" 2>/dev/null; }
 
 for i in 1 2 3; do
   l="$prefix-clean$i"; log "start $l"; campaign "$l"; log "end $l (exit $?)"
   if stopped "$l"; then log "STOP: $l stopped; investigating before more runs"; exit 1; fi
+  if ! definitive "$l"; then log "STOP: $l ended without a definitive verdict; investigating"; exit 1; fi
 done
 
 # Killed while a node of the given kind is running, then resumed by relaunching the same label.
@@ -33,6 +36,7 @@ killed_run() {
   log "killed $l during $pattern; resuming"
   campaign "$l"; log "end $l (exit $?)"
   if stopped "$l"; then log "STOP: $l stopped after resume"; exit 1; fi
+  if ! definitive "$l"; then log "STOP: $l ended without a definitive verdict after resume"; exit 1; fi
 }
 killed_run "$prefix-kill-env" "repro.env"
 killed_run "$prefix-kill-stage" "repro.stage"

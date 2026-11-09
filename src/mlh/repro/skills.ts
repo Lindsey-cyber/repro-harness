@@ -62,6 +62,25 @@ export function currentSite(s: RunState): string | undefined {
 
 // Agents' commands run in remote containers when the run uses Modal: network allowed (they install and
 // download while exploring), no credentials inside, GPU time charged to the paper's budget.
+// Is each declared download reachable from here? A HEAD (or a one-byte GET where HEAD is refused).
+// The error text goes back to the planner, so a wrong scheme, host or path is fixed during planning.
+// MLH_SKIP_URL_PROBE=1 for offline tests whose URLs are served by the fake runner.
+export async function probeUrls(urls: string[]): Promise<string[]> {
+  if (process.env.MLH_SKIP_URL_PROBE === "1") return [];
+  const bad: string[] = [];
+  for (const url of [...new Set(urls)]) {
+    try {
+      let r = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(20_000) });
+      if (r.status === 403 || r.status === 405) r = await fetch(url, { headers: { Range: "bytes=0-0" }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
+      if (r.status >= 400) bad.push(`fetch url ${url} answered HTTP ${r.status}; use a URL that serves the file${url.startsWith("https:") ? " (if the host serves only http, give the http URL with its sha256)" : ""}`);
+    } catch (e) {
+      const why = String((e as { cause?: unknown }).cause ?? e).slice(0, 200);
+      bad.push(`fetch url ${url} is not reachable (${why})${url.startsWith("https:") ? "; if the host serves only http, give the http URL with its sha256" : ""}`);
+    }
+  }
+  return bad;
+}
+
 const remoteFor = (ctx: SkillCtx, pip: string[], image?: string) => {
   const g = need(ctx).gpu;
   if (!g) return {};
@@ -236,12 +255,14 @@ const plan: Skill = {
       const src0 = need(ctx).versionDir(0);
       // The planner can run the very validator that will judge its report, before reporting.
       const checkPlan = { def: { type: "function" as const, function: { name: "check_plan", description: "Validate a draft plan with the harness's own rules (stage structure, scripts exist, GPU allowlist, declared data, worst-case budget). Takes the same object you would report. Returns OK or the list of problems. Use it before report.", parameters: GPU_PLAN_ROLE.report.parameters } },
-        run: async (draft: Record<string, unknown>) => { const v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
+        run: async (draft: Record<string, unknown>) => { let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
       for (let attempt = 0; attempt < 3; attempt++) {
         const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), extraTools: [checkPlan], paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip })}`,
           // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
           role: { ...GPU_PLAN_ROLE, maxSteps: GPU_PLAN_ROLE.maxSteps + attempt * 10 }, ...(feedback ? { continueWith: feedback.trim() } : {}) });
-        const v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) });
+        let v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) });
+        // Every declared download must answer before any GPU time is spent on the plan.
+        if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; }
         if (v.plan) return { output: { specs: [], errors: [], gpuPlan: v.plan } };
         feedback = `\n\nYour previous plan was rejected: ${v.errors.join("; ")}. Fix it.`;
       }
@@ -447,7 +468,12 @@ const fetchData: Skill = {
     writeFileSync(join(dir, "fetch_data.py"), readFileSync(join(import.meta.dirname, "../backends/fetch_data.py")));
     const timeoutS = 3 * 3600;
     const r = await modalRun({ repo: dir, cmd: ["python3", "fetch_data.py", JSON.stringify({ items: p.fetch, checks: p.checks })], timeoutS, network: true }, g.budget);
-    if (r.category) throw new SkillError(r.category === "experiment_error" ? "experiment_error" : r.category, `fetch failed: ${r.stderr.slice(-1500)}`);
+    // A transient network fault is retried as infrastructure; a wrong declaration (404, certificate,
+    // checksum mismatch) is the planner's and is not retried.
+    if (r.category) {
+      const transient = r.category === "experiment_error" && /HTTP Error 5\d\d|timed out|Connection reset|Temporary failure in name resolution|RemoteDisconnected|IncompleteRead/.test(r.stderr);
+      throw new SkillError(transient ? "sandbox_transient" : r.category, `fetch failed: ${r.stderr.slice(-1500)}`);
+    }
     const out = JSON.parse(r.stdout.trim().split("\n").pop() ?? "{}") as { items: unknown[]; checks: { path: string; files: number; minFiles: number; ok: boolean }[] };
     const manifest = join(dir, "data-manifest.json");
     writeFileSync(manifest, JSON.stringify(out, null, 1));

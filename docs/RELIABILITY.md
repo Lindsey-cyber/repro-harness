@@ -61,7 +61,8 @@ Accounting gaps found while writing this:
 | P3 scheduler & driver | done | `tests/mlh-chain` (6 chain cases, strictly sequential), `tests/mlh-campaign` (doctor gate, pinned clone, watchdog kill of a hung child and resume, result row, trust, retro, done marker). Found and fixed: a child that died before its journal was "resumed" (fails); the watchdog never killed a child hung before its first journal write |
 | Mutation check | done | 17 of 17 reintroduced bugs are caught by the suite (`bench/complex/results/reliability/mutations-2026-11-09.txt`) |
 | P4 live canary | **pass** | doctor PASS; canary reproduced exactly on real Modal (image, /cache, T4) in 4 of 4 runs, one killed after 4 nodes and resumed; about $0.001 per run |
-| P5 reliability baseline | running | DETR, 3 clean + 2 killed-and-resumed, sequential (`scripts/mlh-reliability.sh`, `bench/complex/results/reliability/`) |
+| P5 attempt 1 | **failed**, stopped after run 1 | Run 1 (10 min, $0.08) ended without a verdict: the validator allowed https only, so the planner wrote `https://images.cocodataset.org/...`, a host whose certificate does not match (it serves http). Fixed: http allowed with a sha256 (verified by the fetch); every declared URL is probed during planning and an unreachable one is a plan rejection the planner sees; deterministic fetch failures are the planner's, transient ones are retried; the driver now stops at the first run without a definitive verdict |
+| P5 attempt 2 | running | DETR, 3 clean + 2 killed-and-resumed, sequential, from scratch |
 
 Offline suite: 21 files, 168 tests, all passing.
 

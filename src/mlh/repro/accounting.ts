@@ -5,7 +5,8 @@ import type { FailureCategory } from "../core/types.ts";
 
 export type FailureClass = "infrastructure" | "resource" | "agent" | "paper" | "unclassified";
 
-const AGENT_NODES = /^repro\.(claims|env|plan|debug|patch)\b/;
+// repro.fetch downloads what the planner declared: a deterministic failure there is the planner's.
+const AGENT_NODES = /^repro\.(claims|env|plan|debug|patch|fetch)\b/;
 
 // The table, by category and by the kind of node that failed.
 export function failureClass(category: string | undefined, nodeId: string, message = ""): FailureClass {
