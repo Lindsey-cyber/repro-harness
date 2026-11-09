@@ -187,6 +187,8 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
     }
   }));
   writeFileSync(join(o.out, `${o.label}.md`), render(rows, [gateNote, "", renderTrust(trust)]));
+  // Marker for chained rounds: "finished" must not be confused with "not started yet".
+  writeFileSync(join(base, "done"), new Date().toISOString());
 }
 
 // One line per paper: finished node kinds, nodes running now, failures, GPU spent, minutes since progress.
