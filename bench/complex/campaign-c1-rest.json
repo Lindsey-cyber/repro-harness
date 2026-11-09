@@ -1,0 +1,10 @@
+[
+ {
+  "id": "simsiam",
+  "arxiv": "2011.10566",
+  "repo": "https://github.com/PatrickHua/SimSiam",
+  "commit": "75a7c51",
+  "objective": "Check the stop-gradient ablation of SimSiam on CIFAR-10 with this repository: with stop-gradient, kNN accuracy is high; without it, the representation collapses (accuracy near chance). A scaled-down number of epochs is acceptable.",
+  "budgetUsd": 5
+ }
+]
