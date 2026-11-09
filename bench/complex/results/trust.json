@@ -1,9 +1,9 @@
 {
  "claims": {
   "level": "probation",
-  "n": 4,
-  "ok": 4,
-  "lower": 0.5100999795960008,
+  "n": 5,
+  "ok": 5,
+  "lower": 0.565508505247919,
   "history": [
    {
     "at": "2026-11-08T18:11:39.349Z",
@@ -28,14 +28,20 @@
     "paper": "c1/ft_transformer",
     "ok": true,
     "why": "every extracted number is in the PDF"
+   },
+   {
+    "at": "2026-11-09T02:19:21.707Z",
+    "paper": "c1/lora",
+    "ok": true,
+    "why": "every extracted number is in the PDF"
    }
   ]
  },
  "env": {
   "level": "probation",
-  "n": 3,
-  "ok": 3,
-  "lower": 0.4384939195509822,
+  "n": 4,
+  "ok": 4,
+  "lower": 0.5100999795960008,
   "history": [
    {
     "at": "2026-11-08T18:11:39.349Z",
@@ -54,14 +60,20 @@
     "paper": "c1/graphsaint",
     "ok": true,
     "why": "smoke test passed on the agent's own report"
+   },
+   {
+    "at": "2026-11-09T02:19:21.707Z",
+    "paper": "c1/lora",
+    "ok": true,
+    "why": "smoke test passed on the agent's own report"
    }
   ]
  },
  "planner": {
   "level": "probation",
-  "n": 3,
-  "ok": 1,
-  "lower": 0.061490315276160515,
+  "n": 4,
+  "ok": 2,
+  "lower": 0.15003570882017145,
   "history": [
    {
     "at": "2026-11-08T18:11:39.349Z",
@@ -80,6 +92,12 @@
     "paper": "c1/graphsaint",
     "ok": false,
     "why": "plan rejected by the validator"
+   },
+   {
+    "at": "2026-11-09T02:19:21.707Z",
+    "paper": "c1/lora",
+    "ok": true,
+    "why": "plan accepted"
    }
   ]
  },
