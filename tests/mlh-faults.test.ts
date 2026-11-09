@@ -391,3 +391,13 @@ describe("P2: a GPU type without capacity", () => {
     expect(journal(ws.runDir).filter((e) => e.t === "fail")).toEqual([]); // no failed attempt, no stop
   }, 60_000);
 });
+
+describe("P2: a stage that hits its time limit", () => {
+  it("gives no value even if it printed one (truncated run); the retry gets twice the time and gives the real result", async () => {
+    const ws = workspace([{ when: STAGE, nth: [1], exit: 124, stdout: "epoch 3\naccuracy: 0.5000\n", stderr: "timeout" }]);
+    await run(ws, canaryScript());
+    expect(claims(ws.runDir)).toEqual(CLEAN); // 0.9 from the full run, not 0.5 from the truncated one
+    const calls = readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((c) => /train\.py --steps 100$/.test((c.cmd as string[]).join(" ")));
+    expect(calls.map((c) => c.timeout_s)).toEqual([300, 600]);
+  }, 60_000);
+});

@@ -36,7 +36,7 @@ import { parseDiff, riskOf } from "./patchrisk.ts";
 import { CLAIMS_PROMPT, DEBUG_ROLE, ENV_ROLE, PLAN_ROLE } from "./roles.ts";
 import type { SiteManager } from "./site.ts";
 import { Budget, cpuPrice, gpuPrice, modalRun } from "../backends/modal.ts";
-import { checkFetchItems, DATA_DOMAINS, fallbackGpus, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, imageForPins, type FetchItem, validateGpuPlan, type Stage } from "./gpu.ts";
+import { checkFetchItems, DATA_DOMAINS, fallbackGpus, MAX_STAGE_S, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, imageForPins, type FetchItem, validateGpuPlan, type Stage } from "./gpu.ts";
 import { GPU_PLAN_ROLE } from "./roles.ts";
 
 export interface ReproCtx {
@@ -512,7 +512,10 @@ const stage: Skill = {
     });
     const persist = st.persist.map((path) => ({ from: path, to: `${area(st, seed)}/${path}` }));
     const cmd = st.cwd ? ["bash", "-c", 'cd "$1" && shift && exec "$@"', "bash", st.cwd, ...argv] : argv;
-    const runOn = (gpu: string | undefined) => modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(gpu ? { gpu } : {}) }, g.budget);
+    // Each retry after a timeout gets twice the time (bounded): the same limit again would time out again.
+    const attempt = ctx.state.nodes.get(ctx.node.id)?.attempts ?? 1;
+    const timeoutS = Math.min(st.timeoutS * 2 ** Math.max(0, attempt - 1), MAX_STAGE_S);
+    const runOn = (gpu: string | undefined) => modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(gpu ? { gpu } : {}) }, g.budget);
     // A GPU type out of capacity: the next cheapest type with enough memory, in the same attempt
     // (LoRA r3: L4 queued 20 min, then "Insufficient capacity").
     let r = await runOn(st.gpu), ranOn = st.gpu;
@@ -543,7 +546,9 @@ const stage: Skill = {
       const v = parseMetric({ claim: c.claim, argv, seeds: [], parse: c.parse, timeoutS: st.timeoutS, ...(c.scale ? { scale: c.scale } : {}) }, claim.metric, text);
       if (v !== undefined) values[c.claim] = v;
     }
-    if (r.category && !(r.category === "timeout" && Object.keys(values).length)) throw new SkillError(r.category, `${argv.join(" ")} → ${r.category} (exit ${r.exitCode}): ${r.stderr.slice(-1500)}`);
+    // A stage that hit its time limit gives no value, even if it printed some: a truncated training run's
+    // last epoch is not the paper's protocol (LoRA r3: RTE planned at ~35 min, about its expected run time).
+    if (r.category) throw new SkillError(r.category, `${argv.join(" ")} → ${r.category} (exit ${r.exitCode}): ${r.stderr.slice(-1500)}`);
     const missing = p.claims.filter((x) => x.stage === sid && values[x.claim] === undefined).map((x) => x.claim);
     if (missing.length) throw new SkillError("experiment_error", `stage ${sid} finished but its output has no value for ${missing.join(", ")}; tail:\n${r.stdout.slice(-800)}`);
     return { output: { stage: sid, seed, values, ...(ranOn !== st.gpu ? { gpu: ranOn, plannedGpu: st.gpu } : {}), ...(Object.keys(disambiguated).length ? { disambiguated } : {}), version, elapsedS: Math.round(r.elapsedS), costUsd: Number(r.costUsd.toFixed(4)), spentUsd: Number(g.budget.spent.toFixed(4)) } };

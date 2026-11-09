@@ -33,10 +33,12 @@ def main():
             json.dump(counts, open(counts_file, "w"))
             if k in f.get("nth", [1]):
                 if "exit" in f:  # the command ran and failed (OOM, timeout): a result, not a platform error
-                    return {"ok": True, "exit_code": f["exit"], "stdout": "", "stderr": f.get("stderr", ""), "elapsed_s": elapsed, "files": {}}
+                    with open(os.path.join(cache, ".fake-calls.jsonl"), "a") as log:
+                        log.write(json.dumps({"cmd": cmd, "gpu": req.get("gpu"), "timeout_s": req.get("timeout_s"), "fault": f.get("exit")}) + "\n")
+                    return {"ok": True, "exit_code": f["exit"], "stdout": f.get("stdout", ""), "stderr": f.get("stderr", ""), "elapsed_s": elapsed, "files": {}}
                 return {"ok": False, "error": f["error"], "elapsed_s": elapsed}
     with open(os.path.join(cache, ".fake-calls.jsonl"), "a") as log:
-        log.write(json.dumps({"cmd": cmd, "gpu": req.get("gpu"), "image": req.get("image"), "pip": req.get("pip"), "volume": req.get("cache_volume"), "system": req.get("system"), "memory_mb": req.get("memory_mb"), "links": req.get("links")}) + "\n")
+        log.write(json.dumps({"cmd": cmd, "gpu": req.get("gpu"), "image": req.get("image"), "pip": req.get("pip"), "volume": req.get("cache_volume"), "system": req.get("system"), "memory_mb": req.get("memory_mb"), "links": req.get("links"), "timeout_s": req.get("timeout_s")}) + "\n")
     work = tempfile.mkdtemp(prefix="fake-work-")
     try:
         shutil.copytree(req["repo"], work, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git"))
