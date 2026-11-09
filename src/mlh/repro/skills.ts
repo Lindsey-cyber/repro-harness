@@ -352,11 +352,13 @@ const toFraction = (raw: number, spec: { scale?: number }, metric: string) => (s
 // Never "the last match": on DETR's COCO summary that silently read AR@100 (0.574) for AP (0.420).
 // Matches whose lines read the same apart from the value are one metric over time (per-epoch logs):
 // the final value counts. Matches with different labels are different metrics: ambiguous.
-export function metricSeries(ms: { masked: string; raw: number }[]): { label: string; last: number }[] {
-  const by = new Map<string, number>();
-  for (const m of ms) { by.delete(m.masked); by.set(m.masked, m.raw); }
-  return [...by].map(([label, last]) => ({ label, last }));
+export function metricSeries(ms: { masked: string; raw: number }[]): { label: string; last: number; values: number[] }[] {
+  const by = new Map<string, number[]>();
+  for (const m of ms) { const v = by.get(m.masked) ?? []; by.delete(m.masked); by.set(m.masked, [...v, m.raw]); }
+  return [...by].map(([label, values]) => ({ label, last: values.at(-1)!, values }));
 }
+// One run's value from its series, by the plan's declared rule. Pure.
+export const pick = (values: number[], select: "last" | "max" | "min" = "last") => (select === "max" ? Math.max(...values) : select === "min" ? Math.min(...values) : values.at(-1)!);
 export function parseMetric(spec: RunSpec, metric: string, text: string): number | undefined {
   const series = metricSeries(metricMatches(spec.parse, text));
   return series.length === 1 ? toFraction(series[0]!.last, spec, metric) : undefined;
@@ -403,9 +405,11 @@ const run: Skill = {
 };
 
 // The status rule (bench/repro/SPEC.md), identical for every system.
-export function statusOf(c: Claim, values: number[]): { status: Status; mean: number; std: number; tol: number } {
-  const n = values.length, mean = values.reduce((a, b) => a + b, 0) / n;
-  const std = n > 1 ? Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+export function statusOf(c: Claim, values: number[], aggregate: "mean" | "median" = "mean"): { status: Status; mean: number; std: number; tol: number } {
+  const n = values.length, avg = values.reduce((a, b) => a + b, 0) / n;
+  const sorted = [...values].sort((a, b) => a - b), median = n % 2 ? sorted[(n - 1) / 2]! : (sorted[n / 2 - 1]! + sorted[n / 2]!) / 2;
+  const mean = aggregate === "median" ? median : avg; // the paper's own aggregate (the field keeps its name)
+  const std = n > 1 ? Math.sqrt(values.reduce((a, b) => a + (b - avg) ** 2, 0) / (n - 1)) : 0;
   const tol = Math.max(0.01, 2 * (c.std ?? 0), n > 1 ? 2 * std / Math.sqrt(n) : 0);
   return { status: Math.abs(mean - c.value) <= tol ? "reproduced" : "not_reproduced", mean, std, tol };
 }
@@ -419,7 +423,8 @@ const compare: Skill = {
     const c = claimsOf(ctx.state).find((x) => x.id === claim)!;
     const values = ctx.node.deps.map((d) => { const o = ctx.state.nodes.get(d)!.output as { value?: number; values?: Record<string, number> }; return o.values?.[claim] ?? o.value!; }).filter((v) => typeof v === "number");
     if (!values.length) throw new SkillError("experiment_error", `no stage output carries a value for ${claim}`);
-    const s = statusOf(c, values);
+    const declared = gpuPlanOf(ctx.state)?.claims.find((x) => x.claim === claim);
+    const s = statusOf(c, values, declared?.aggregate);
     return { output: { claim, ...s, values, value: c.value } };
   },
 };
@@ -540,11 +545,10 @@ const stage: Skill = {
         for (let k = 0; k < 2 && d.index === undefined && /^model error/.test(d.why); k++) d = await disambiguate(ctx.llm?.proposer, claim, c.parse, series).catch((e) => ({ why: `model error: ${String(e).slice(0, 120)}`, options: d.options }));
         disambiguated[c.claim] = d;
         if (d.index === undefined) throw new SkillError("contract_violation", `ambiguous metric for ${c.claim}: the pattern matched ${series.length} differently labelled lines and none could be chosen by label (${d.why}); lines: ${d.options.join(" || ")}`);
-        values[c.claim] = toFraction(series[d.index]!.last, c, claim.metric);
+        values[c.claim] = toFraction(pick(series[d.index]!.values, c.select), c, claim.metric);
         continue;
       }
-      const v = parseMetric({ claim: c.claim, argv, seeds: [], parse: c.parse, timeoutS: st.timeoutS, ...(c.scale ? { scale: c.scale } : {}) }, claim.metric, text);
-      if (v !== undefined) values[c.claim] = v;
+      if (series.length === 1) values[c.claim] = toFraction(pick(series[0]!.values, c.select), c, claim.metric);
     }
     // A stage that hit its time limit gives no value, even if it printed some: a truncated training run's
     // last epoch is not the paper's protocol (LoRA r3: RTE planned at ~35 min, about its expected run time).

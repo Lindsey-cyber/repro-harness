@@ -128,3 +128,28 @@ describe("GPU fallback order", async () => {
     expect(fallbackGpus("T4", 30)).toEqual(["A100-40GB", "A100-80GB"]);
   });
 });
+
+describe("declared reporting rule (select over epochs, aggregate over seeds)", async () => {
+  const { pick, statusOf } = await import("../src/mlh/repro/skills.ts");
+  const { validateGpuPlan } = await import("../src/mlh/repro/gpu.ts");
+  const { gpuPrice } = await import("../src/mlh/backends/modal.ts");
+  it("picks the last, best or lowest value of a real per-epoch series", () => {
+    const FT = readFileSync("tests/fixtures/ft-transformer-ca-seed0.txt", "utf8");
+    const s = metricSeries(metricMatches("\\[test \\] score = -?[0-9.]+ \\| rmse = ([0-9.]+)", FT))[0]!;
+    expect(pick(s.values)).toBe(0.459);
+    expect(pick(s.values, "min")).toBe(Math.min(...s.values));
+    expect(pick(s.values, "max")).toBe(Math.max(...s.values));
+  });
+  it("aggregates seeds by the paper's rule (LoRA: median of 5)", () => {
+    const c = { id: "c", metric: "accuracy", value: 0.897, std: 0.007 } as never;
+    expect(statusOf(c, [0.88, 0.89, 0.95], "median").mean).toBe(0.89);
+    expect(statusOf(c, [0.88, 0.89, 0.95]).mean).toBeCloseTo(0.9067, 3);
+  });
+  it("the plan declares it; unknown rules are rejected", () => {
+    const plan = (x: Record<string, unknown>) => ({ fidelity: "full", stages: [{ id: "s", argv: ["python", "a.py"], timeoutS: 300 }], claims: [{ claim: "c", stage: "s", parse: "acc: ([0-9.]+)", ...x }] });
+    const v = (x: Record<string, unknown>) => validateGpuPlan([{ id: "c", metric: "acc", value: 0.9 }] as never, plan(x), { budgetUsd: 5, price: gpuPrice });
+    expect(v({ select: "max", aggregate: "median" }).plan!.claims[0]).toMatchObject({ select: "max", aggregate: "median" });
+    expect(v({ select: "best" }).errors.join()).toMatch(/select must be last, max or min/);
+    expect(v({ aggregate: "mode" }).errors.join()).toMatch(/aggregate must be mean or median/);
+  });
+});

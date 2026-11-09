@@ -101,7 +101,7 @@ export interface GpuPlan {
   checks: { path: string; minFiles: number }[];
   unknownHosts: string[];
   stages: Stage[];
-  claims: { claim: string; stage: string; parse: string; scale?: number }[];
+  claims: { claim: string; stage: string; parse: string; scale?: number; select?: "last" | "max" | "min"; aggregate?: "mean" | "median" }[];
   seeds: number[];
   seedArg?: string;
   seedEnv?: string;
@@ -219,7 +219,13 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     // The pattern must find the metric by its label, not by expected numbers (SimCSE r1: the planner
     // wrote the seven per-task scores into the pattern; it only matched because they repeated exactly).
     if ((String(m.parse).match(/\d+\\?\.\d+/g) ?? []).length > 2) { errors.push(`${c.id}: parse must locate the metric by its label, not by expected numbers (it contains more than two decimal literals)`); continue; }
-    cl.push({ claim: c.id, stage: String(m.stage).replace(/[^\w-]/g, "_"), parse: String(m.parse), ...(typeof m.scale === "number" && m.scale > 0 ? { scale: m.scale } : {}) });
+    // How the paper reports the number, declared before any result is seen: which value of a per-epoch
+    // series counts (last, max = best epoch for accuracy-like metrics, min = best for errors) and how
+    // seeds combine (mean or median). LoRA reports the best epoch's value, median over seeds.
+    const sel = (m as { select?: unknown }).select, agg = (m as { aggregate?: unknown }).aggregate;
+    if (sel !== undefined && !["last", "max", "min"].includes(String(sel))) { errors.push(`${c.id}: select must be last, max or min`); continue; }
+    if (agg !== undefined && !["mean", "median"].includes(String(agg))) { errors.push(`${c.id}: aggregate must be mean or median`); continue; }
+    cl.push({ claim: c.id, stage: String(m.stage).replace(/[^\w-]/g, "_"), parse: String(m.parse), ...(typeof m.scale === "number" && m.scale > 0 ? { scale: m.scale } : {}), ...(sel ? { select: sel as "last" | "max" | "min" } : {}), ...(agg ? { aggregate: agg as "mean" | "median" } : {}) });
   }
   const seeds = [...new Set((Array.isArray(r.seeds) ? r.seeds : [0]).filter((x) => Number.isInteger(x)))].slice(0, 5);
   if (!seeds.length) seeds.push(0);
