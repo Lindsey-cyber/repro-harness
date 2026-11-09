@@ -39,7 +39,7 @@ describe("reproduction: deciding code", () => {
     expect(statusOf({ ...claim, std: 0.01 }, [0.83, 0.832, 0.831]).status).toBe("reproduced");
   });
 
-  it("parses the last metric match and normalizes percentages", () => {
+  it("a metric logged repeatedly under one label: the last value; percentages normalized", () => {
     const spec = { claim: "cora", argv: [], seeds: [0], parse: "accuracy= ?([0-9.]+)", timeoutS: 60 };
     expect(parseMetric(spec, "accuracy", "accuracy= 0.70\n...\naccuracy= 0.8350")).toBe(0.835);
     expect(parseMetric(spec, "accuracy", "accuracy=81.5")).toBeCloseTo(0.815);

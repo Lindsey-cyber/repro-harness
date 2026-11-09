@@ -8,7 +8,7 @@ import { zeroUsage, type ChatMsg } from "../../src/mlh/io/llm.ts";
 import type { ChatModel, Models } from "../../src/mlh/skills/index.ts";
 
 export type Call = { name: string; args: Record<string, unknown> };
-export interface TeamScript { claims: unknown; env: Call[]; plan: Call[]; debug?: Call[] }
+export interface TeamScript { claims: unknown; env: Call[]; plan: Call[]; debug?: Call[]; pick?: { index: number | null; why: string } }
 
 export const CANARY_REPO = resolve("tests/fixtures/canary-repo");
 export const FAKE_RUNNER = resolve("tests/fixtures/fake_modal.py");
@@ -32,6 +32,8 @@ export function scriptedTeam(script: TeamScript, log: string[] = []): Models {
     model: "scripted", usage: zeroUsage(),
     async chat(msgs: ChatMsg[]) {
       const role = roleOf(msgs);
+      // Metric disambiguation (values masked) asks for {index, why}.
+      if (/map an experiment.s output line/.test(String(msgs[0]?.content ?? ""))) { log.push("pick"); return { message: { role: "assistant" as const, content: JSON.stringify(script.pick ?? { index: null, why: "scripted: none" }) }, usage: zeroUsage() }; }
       // Claims extraction asks for a JSON object in plain text (no tools).
       if (!role) { log.push("claims"); return { message: { role: "assistant" as const, content: JSON.stringify(script.claims) }, usage: zeroUsage() }; }
       const calls = (role && role !== "claims" ? (script[role] as Call[] | undefined) : undefined) ?? [];
@@ -40,7 +42,10 @@ export function scriptedTeam(script: TeamScript, log: string[] = []): Models {
       log.push(`${role}:${k}:${c.name}`);
       return { message: { role: "assistant" as const, content: "", tool_calls: [{ id: `${role}-${k}`, type: "function" as const, function: { name: c.name, arguments: JSON.stringify(c.args) } }] }, usage: zeroUsage() };
     },
-    async json<T>() { log.push("claims"); return script.claims as T; },
+    async json<T>(system: string) {
+      if (/map an experiment.s output line/.test(system)) { log.push("pick"); return (script.pick ?? { index: null, why: "scripted: none" }) as T; }
+      log.push("claims"); return script.claims as T;
+    },
   } as unknown as ChatModel;
   return { proposer: m, reviewer: m };
 }

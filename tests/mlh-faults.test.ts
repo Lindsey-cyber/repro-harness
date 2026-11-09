@@ -236,3 +236,27 @@ describe("P1: run isolation", () => {
     expect(vols[0]).not.toBe(vols[1]);
   }, 60_000);
 });
+
+describe("P1: ambiguous metric in a real run", () => {
+  const ambiguous = (pick?: { index: number | null; why: string }) => {
+    const s = canaryScript();
+    const plan = structuredClone(s.plan[0]!.args) as { stages: { argv: string[] }[] };
+    plan.stages[0]!.argv = ["python3", "train.py", "--steps", "100", "--also-train-acc"]; // "accuracy: " now matches two lines
+    s.plan = [{ name: "report", args: plan }];
+    if (pick) s.pick = pick;
+    return s;
+  };
+  it("the line chosen by label gives the verdict, and the choice is journaled", async () => {
+    const ws = workspace();
+    await run(ws, ambiguous({ index: 1, why: "the test accuracy line" }));
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+    const st = journal(ws.runDir).find((e) => e.t === "ok" && String(e.id).startsWith("repro.stage"));
+    expect(st.output.disambiguated.canary_acc).toMatchObject({ index: 1, options: ["train accuracy: <value>", "accuracy: <value>"] });
+  }, 60_000);
+  it("no line can be chosen: no verdict and the run stops by name (never the last match)", async () => {
+    const ws = workspace();
+    await run(ws, ambiguous());
+    expect(claims(ws.runDir)[0]![1]).not.toMatch(/reproduced/);
+    expect(journal(ws.runDir).some((e) => e.t === "fail" && /ambiguous metric/.test(e.message))).toBe(true);
+  }, 60_000);
+});

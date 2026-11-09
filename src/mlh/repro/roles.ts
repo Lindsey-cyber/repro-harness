@@ -70,7 +70,7 @@ export const GPU_PLAN_ROLE: Role = {
   maxSteps: 25, maxRunS: 600, wallMin: 30,
   tools: ["list_files", "read_file", "run", "read_paper"],
   writeCode: false,
-  system: `Plan from the code and the paper; do not run training to time it. A short timing check (one command, at most 10 minutes) is allowed; your whole session has 30 minutes.
+  system: `Each claim's parse regex must match only the output line(s) of that exact metric, anchored on its own label (e.g. "Average Precision  \\(AP\\) @\\[ IoU=0\\.50:0\\.95 \\| area=   all"), never a pattern that also fits other metrics' lines. Plan from the code and the paper; do not run training to time it. A short timing check (one command, at most 10 minutes) is allowed; your whole session has 30 minutes.
 
 You are the planner of an ML reproduction team working on remote GPUs with a fixed dollar budget per paper. Given the paper's claims and the environment engineer's notes, design the reproduction as a DAG of stages, each one command of the repository run in a fresh container: e.g. fetch data/checkpoints (network allowed, no GPU) -> preprocess -> train or fine-tune (GPU) -> evaluate (GPU). Files a stage must hand to later stages are listed in its "persist" (repo-relative paths); they are restored for the stages that need it.
 

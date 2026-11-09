@@ -288,13 +288,48 @@ function seeded(spec: RunSpec, seed: number, argvOverride?: string[]): { argv: s
   return { argv, env };
 }
 
+// Every line the claim's regex matches, with the captured number. Pure.
+export function metricMatches(parse: string, text: string): { line: string; raw: number; masked: string }[] {
+  const out: { line: string; raw: number; masked: string }[] = [];
+  for (const m of text.matchAll(new RegExp(parse, "g"))) {
+    const raw = Number(m[1]);
+    if (!Number.isFinite(raw)) continue;
+    const at = m.index ?? 0, start = text.lastIndexOf("\n", at) + 1, end = text.indexOf("\n", at + m[0].length);
+    // The captured text itself, at its own position, is what gets masked (not String(raw): "0.9000" is 0.9).
+    const cap = at + m[0].indexOf(m[1]!), line = text.slice(start, end < 0 ? undefined : end);
+    const masked = (text.slice(start, cap) + "<value>" + text.slice(cap + m[1]!.length, end < 0 ? undefined : end)).trim();
+    out.push({ line: line.trim(), raw, masked });
+  }
+  return out;
+}
+
+const toFraction = (raw: number, spec: { scale?: number }, metric: string) => (spec.scale ? raw * spec.scale : raw > 1 && raw <= 100 && /acc|f1|auc|precision|recall/i.test(metric) ? raw / 100 : raw);
+
+// The claim's number, or undefined when the output has none or the regex matches different values.
+// Never "the last match": on DETR's COCO summary that silently read AR@100 (0.574) for AP (0.420).
+// Matches whose lines read the same apart from the value are one metric over time (per-epoch logs):
+// the final value counts. Matches with different labels are different metrics: ambiguous.
+export function metricSeries(ms: { masked: string; raw: number }[]): { label: string; last: number }[] {
+  const by = new Map<string, number>();
+  for (const m of ms) { by.delete(m.masked); by.set(m.masked, m.raw); }
+  return [...by].map(([label, last]) => ({ label, last }));
+}
 export function parseMetric(spec: RunSpec, metric: string, text: string): number | undefined {
-  const re = new RegExp(spec.parse, "g");
-  const all = [...text.matchAll(re)];
-  const raw = all.length ? Number(all[all.length - 1]![1]) : NaN;
-  if (!Number.isFinite(raw)) return undefined;
-  if (spec.scale) return raw * spec.scale;
-  return raw > 1 && raw <= 100 && /acc|f1|auc|precision|recall/i.test(metric) ? raw / 100 : raw;
+  const series = metricSeries(metricMatches(spec.parse, text));
+  return series.length === 1 ? toFraction(series[0]!.last, spec, metric) : undefined;
+}
+
+// Several different values matched: the model picks the line that reports the claim's metric by its
+// label only. Values are masked, so the choice cannot lean toward the paper's number. Journaled.
+export async function disambiguate(model: { json<T>(system: string, user: string, maxTokens?: number): Promise<T> } | undefined, claim: Claim, parse: string, matches: { label: string }[]): Promise<{ index?: number; why: string; options: string[] }> {
+  const options = matches.map((m) => m.label);
+  if (!model) return { why: "no model to disambiguate", options };
+  const r = await model.json<{ index?: number; why?: string }>(
+    "You map an experiment's output line to a paper's claim. Several lines matched the claim's pattern; their values are hidden. Answer with JSON {\"index\": <0-based line index>, \"why\": \"...\"}, or {\"index\": null, \"why\": \"...\"} if no line reports exactly the claimed metric. Decide by the line's label only.",
+    `Claim: ${JSON.stringify({ id: claim.id, metric: claim.metric, dataset: claim.dataset, table: claim.table, method: claim.method })}\nPattern: ${parse}\nLines:\n${options.map((o, i) => `${i}: ${o}`).join("\n")}`, 2000);
+  // Only an actual number counts: Number(null) is 0, which would silently pick the first line.
+  const i = typeof r.index === "number" ? r.index : NaN;
+  return Number.isInteger(i) && i >= 0 && i < matches.length ? { index: i, why: String(r.why ?? ""), options } : { why: String(r.why ?? "no line chosen"), options };
 }
 
 const run: Skill = {
@@ -408,7 +443,7 @@ const patch: Skill = {
 // One stage of a GPU plan, in a fresh remote container: restore the outputs of the stages it needs,
 // run, persist its own outputs, and parse every claim this stage measures.
 const stage: Skill = {
-  id: "repro.stage", version: "1.0.0", purpose: "detect", intents: ["reproduce"], actions: ["exec_sandboxed"], after: [], needs: () => null,
+  id: "repro.stage", version: "1.0.0", purpose: "detect", intents: ["reproduce"], actions: ["exec_sandboxed", "model_query"], after: [], needs: () => null,
   summary: "Run one stage of the reproduction plan on a remote GPU (or CPU) container, charged to the paper's budget.",
   output: any,
   async run(ctx) {
@@ -438,15 +473,24 @@ const stage: Skill = {
     ctx.save("log", log);
     const text = `${r.stdout}\n${r.stderr}`;
     const values: Record<string, number> = {};
+    const disambiguated: Record<string, unknown> = {};
     for (const c of p.claims.filter((x) => x.stage === sid)) {
       const claim = claimsOf(ctx.state).find((x) => x.id === c.claim)!;
+      const series = metricSeries(metricMatches(c.parse, text));
+      if (series.length > 1) {
+        const d = await disambiguate(ctx.llm?.reviewer, claim, c.parse, series);
+        disambiguated[c.claim] = d;
+        if (d.index === undefined) throw new SkillError("contract_violation", `ambiguous metric for ${c.claim}: the pattern matched ${series.length} differently labelled lines and none could be chosen by label (${d.why}); lines: ${d.options.join(" || ")}`);
+        values[c.claim] = toFraction(series[d.index]!.last, c, claim.metric);
+        continue;
+      }
       const v = parseMetric({ claim: c.claim, argv, seeds: [], parse: c.parse, timeoutS: st.timeoutS, ...(c.scale ? { scale: c.scale } : {}) }, claim.metric, text);
       if (v !== undefined) values[c.claim] = v;
     }
     if (r.category && !(r.category === "timeout" && Object.keys(values).length)) throw new SkillError(r.category, `${argv.join(" ")} → ${r.category} (exit ${r.exitCode}): ${r.stderr.slice(-1500)}`);
     const missing = p.claims.filter((x) => x.stage === sid && values[x.claim] === undefined).map((x) => x.claim);
     if (missing.length) throw new SkillError("experiment_error", `stage ${sid} finished but its output has no value for ${missing.join(", ")}; tail:\n${r.stdout.slice(-800)}`);
-    return { output: { stage: sid, seed, values, version, elapsedS: Math.round(r.elapsedS), costUsd: Number(r.costUsd.toFixed(4)), spentUsd: Number(g.budget.spent.toFixed(4)) } };
+    return { output: { stage: sid, seed, values, ...(Object.keys(disambiguated).length ? { disambiguated } : {}), version, elapsedS: Math.round(r.elapsedS), costUsd: Number(r.costUsd.toFixed(4)), spentUsd: Number(g.budget.spent.toFixed(4)) } };
   },
 };
 
