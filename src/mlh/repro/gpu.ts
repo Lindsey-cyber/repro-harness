@@ -10,6 +10,13 @@ import { claimsOf, currentVersion, N, type Claim } from "./flow.ts";
 export const GPUS = ["T4", "L4", "A10G", "A100-40GB", "A100-80GB", "H100"];
 // GPU memory (GB). A stage that states its memory need gets the cheapest GPU that fits.
 export const GPU_MEM: Record<string, number> = { T4: 16, L4: 24, A10G: 24, "A100-40GB": 40, "A100-80GB": 80, H100: 80 };
+// Alternatives when a GPU type has no capacity: types with at least the memory needed (or the planned
+// type's memory), cheapest first, at most two. Pure.
+export function fallbackGpus(planned: string, memGB?: number, price: (g: string) => number = (x) => Number(process.env[`MLH_GPU_PRICE_${x.replace(/\W/g, "_")}`] ?? DEFAULT_GPU_PRICE[x] ?? 4)): string[] {
+  const need = memGB ?? GPU_MEM[planned] ?? 16;
+  return GPUS.filter((x) => x !== planned && (GPU_MEM[x] ?? 0) >= need).sort((a, b) => price(a) - price(b)).slice(0, 2);
+}
+const DEFAULT_GPU_PRICE: Record<string, number> = { T4: 0.59, L4: 0.8, A10G: 1.1, "A100-40GB": 2.1, "A100-80GB": 2.5, H100: 3.95 };
 // Hosts that serve datasets and released weights. Fetching from anywhere else needs a human.
 export const DATA_HOSTS = [
   "images.cocodataset.org", "dl.fbaipublicfiles.com", "download.pytorch.org", "huggingface.co", "cdn-lfs.huggingface.co",

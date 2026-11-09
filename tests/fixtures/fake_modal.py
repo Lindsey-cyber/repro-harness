@@ -27,7 +27,7 @@ def main():
     counts_file = os.path.join(cache, ".fake-counts.json")
     counts = json.load(open(counts_file)) if os.path.exists(counts_file) else {}
     for i, f in enumerate(json.loads(os.environ.get("MLH_FAKE_FAULTS", "[]"))):
-        if re.search(f["when"], text):
+        if re.search(f["when"], text) and (not f.get("gpu") or f["gpu"] == req.get("gpu")):
             k = counts.get(str(i), 0) + 1
             counts[str(i)] = k
             json.dump(counts, open(counts_file, "w"))

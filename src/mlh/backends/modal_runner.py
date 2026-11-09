@@ -28,6 +28,7 @@ import modal
 APP = "mlh-repro"
 DEFAULT_IMAGE = "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime"
 _images = {}
+CREATED_AT = None
 
 
 def tar_dir(path):
@@ -81,6 +82,8 @@ def op_run(req):
     try:
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf), modal.enable_output():
             sb = modal.Sandbox.create(**kwargs)
+        global CREATED_AT
+        CREATED_AT = time.time()  # billing starts here: time queued for capacity is not container time
     except Exception as e:
         lines = [l for l in buf.getvalue().splitlines() if l.strip()]
         errs = [l for l in lines if any(k in l for k in ("error", "Error", "ERROR", "failed", "Failed", "No matching distribution"))][-15:]
@@ -129,4 +132,5 @@ if __name__ == "__main__":
         res = {"check": op_check, "run": op_run}[req["op"]](req)
         print(json.dumps({"ok": True, **res}))
     except Exception as e:  # reported to the harness, which classifies it (and charges what ran)
-        print(json.dumps({"ok": False, "error": f"{type(e).__name__}: {str(e)[:2000]}", "elapsed_s": time.time() - T0}))
+        # Only the time a container existed is charged; a capacity error while queued costs nothing.
+        print(json.dumps({"ok": False, "error": f"{type(e).__name__}: {str(e)[:2000]}", "elapsed_s": time.time() - CREATED_AT if CREATED_AT else 0, "queued_s": time.time() - T0}))

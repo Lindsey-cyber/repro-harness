@@ -36,7 +36,7 @@ import { parseDiff, riskOf } from "./patchrisk.ts";
 import { CLAIMS_PROMPT, DEBUG_ROLE, ENV_ROLE, PLAN_ROLE } from "./roles.ts";
 import type { SiteManager } from "./site.ts";
 import { Budget, cpuPrice, gpuPrice, modalRun } from "../backends/modal.ts";
-import { checkFetchItems, DATA_DOMAINS, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, imageForPins, type FetchItem, validateGpuPlan, type Stage } from "./gpu.ts";
+import { checkFetchItems, DATA_DOMAINS, fallbackGpus, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, imageForPins, type FetchItem, validateGpuPlan, type Stage } from "./gpu.ts";
 import { GPU_PLAN_ROLE } from "./roles.ts";
 
 export interface ReproCtx {
@@ -512,7 +512,15 @@ const stage: Skill = {
     });
     const persist = st.persist.map((path) => ({ from: path, to: `${area(st, seed)}/${path}` }));
     const cmd = st.cwd ? ["bash", "-c", 'cd "$1" && shift && exec "$@"', "bash", st.cwd, ...argv] : argv;
-    const r = await modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(st.gpu ? { gpu: st.gpu } : {}) }, g.budget);
+    const runOn = (gpu: string | undefined) => modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(gpu ? { gpu } : {}) }, g.budget);
+    // A GPU type out of capacity: the next cheapest type with enough memory, in the same attempt
+    // (LoRA r3: L4 queued 20 min, then "Insufficient capacity").
+    let r = await runOn(st.gpu), ranOn = st.gpu;
+    for (const alt of st.gpu ? fallbackGpus(st.gpu, st.gpuMemGB) : []) {
+      if (!(r.category === "provider_transient" && /capacity/i.test(r.stderr))) break;
+      ranOn = alt;
+      r = await runOn(alt);
+    }
     const log = join(ctx.workDir(), `${ctx.node.id.replace(/[^\w.-]+/g, "_")}.log`);
     mkdirSync(ctx.workDir(), { recursive: true });
     writeFileSync(log, `$ ${cmd.join(" ")}\n--- stdout\n${r.stdout.slice(-30000)}\n--- stderr\n${r.stderr.slice(-20000)}`);
@@ -538,7 +546,7 @@ const stage: Skill = {
     if (r.category && !(r.category === "timeout" && Object.keys(values).length)) throw new SkillError(r.category, `${argv.join(" ")} → ${r.category} (exit ${r.exitCode}): ${r.stderr.slice(-1500)}`);
     const missing = p.claims.filter((x) => x.stage === sid && values[x.claim] === undefined).map((x) => x.claim);
     if (missing.length) throw new SkillError("experiment_error", `stage ${sid} finished but its output has no value for ${missing.join(", ")}; tail:\n${r.stdout.slice(-800)}`);
-    return { output: { stage: sid, seed, values, ...(Object.keys(disambiguated).length ? { disambiguated } : {}), version, elapsedS: Math.round(r.elapsedS), costUsd: Number(r.costUsd.toFixed(4)), spentUsd: Number(g.budget.spent.toFixed(4)) } };
+    return { output: { stage: sid, seed, values, ...(ranOn !== st.gpu ? { gpu: ranOn, plannedGpu: st.gpu } : {}), ...(Object.keys(disambiguated).length ? { disambiguated } : {}), version, elapsedS: Math.round(r.elapsedS), costUsd: Number(r.costUsd.toFixed(4)), spentUsd: Number(g.budget.spent.toFixed(4)) } };
   },
 };
 

@@ -118,3 +118,13 @@ describe("smoke test working directory", async () => {
     expect(smokeCwd(undefined)).toBe(".");
   });
 });
+
+describe("GPU fallback order", async () => {
+  const { fallbackGpus } = await import("../src/mlh/repro/gpu.ts");
+  it("cheapest types with enough memory, never the planned one, at most two", () => {
+    expect(fallbackGpus("L4")).toEqual(["A10G", "A100-40GB"]);
+    expect(fallbackGpus("T4")).toEqual(["L4", "A10G"]);
+    expect(fallbackGpus("A100-80GB")).toEqual(["H100"]);
+    expect(fallbackGpus("T4", 30)).toEqual(["A100-40GB", "A100-80GB"]);
+  });
+});

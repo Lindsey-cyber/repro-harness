@@ -43,8 +43,8 @@ describe("P1: repeatability", () => {
 });
 
 describe("P2: platform faults", () => {
-  it("a capacity shortage once: retried, same result, cost shown as retried infrastructure, nobody blamed", async () => {
-    const ws = workspace([{ when: STAGE, nth: [1], error: CAPACITY }]);
+  it("a transport fault once: retried, same result, cost shown as retried infrastructure, nobody blamed", async () => {
+    const ws = workspace([{ when: STAGE, nth: [1], error: RESET }]); // (capacity shortages now fall back to another GPU in the same attempt)
     await run(ws);
     expect(claims(ws.runDir)).toEqual(CLEAN);
     expect(stopped(ws.runDir)).toBeUndefined();
@@ -53,7 +53,7 @@ describe("P2: platform faults", () => {
   }, 60_000);
 
   it("the same fault twice stops the run (infra_repeat); a resume after investigation finishes with the clean result", async () => {
-    const ws = workspace([{ when: STAGE, nth: [1, 2], error: CAPACITY }]);
+    const ws = workspace([{ when: STAGE, nth: [1, 2], error: RESET }]);
     await run(ws);
     expect(stopped(ws.runDir)).toBe("infra_repeat");
     await run(ws);
@@ -376,5 +376,18 @@ describe("P1: declared system layers, host memory and data links reach the stage
     expect(answers.filter((a: string) => a.startsWith("OK:"))).toHaveLength(8);
     expect(answers.some((a: string) => /8-check budget is used up/.test(a))).toBe(true);
     expect(claims(ws.runDir)).toEqual(CLEAN);
+  }, 60_000);
+});
+
+describe("P2: a GPU type without capacity", () => {
+  it("the stage moves to the next cheapest GPU with enough memory in the same attempt, and records it", async () => {
+    const ws = workspace([{ when: STAGE, gpu: "L4", nth: [1, 2, 3], error: "RuntimeError: ResourceExhaustedError: Insufficient capacity to create sandbox." }]);
+    const s = canaryScript();
+    (s.plan[0]!.args as { stages: Record<string, unknown>[] }).stages[0]!.gpu = "L4";
+    await run(ws, s);
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+    const st = journal(ws.runDir).find((e) => e.t === "ok" && String(e.id).startsWith("repro.stage"));
+    expect(st.output).toMatchObject({ gpu: "A10G", plannedGpu: "L4" });
+    expect(journal(ws.runDir).filter((e) => e.t === "fail")).toEqual([]); // no failed attempt, no stop
   }, 60_000);
 });
