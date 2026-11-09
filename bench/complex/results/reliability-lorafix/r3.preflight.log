@@ -6,3 +6,19 @@ doctor PASS (2026-11-09T04:32:36.883Z)
   ok   image py3.7-torch1.10-cu111: python 3.7, torch 1.10
   ok   image py3.8-torch1.7-cu110: python 3.8, torch 1.7
   ok   llm balance: 14.15 (minimum 0)
+doctor PASS (2026-11-09T04:32:36.883Z)
+  ok   image py3.11-torch2.5-cu124: python 3.11, torch 2.5
+  ok   image py3.10-torch2.1-cu121: python 3.10, torch 2.1
+  ok   image py3.10-torch1.13-cu117: python 3.10, torch 1.13
+  ok   image py3.7-torch1.12-cu113: python 3.7, torch 1.12
+  ok   image py3.7-torch1.10-cu111: python 3.7, torch 1.10
+  ok   image py3.8-torch1.7-cu110: python 3.8, torch 1.7
+  ok   llm balance: 14.15 (minimum 0)
+doctor PASS (2026-11-09T04:32:36.883Z)
+  ok   image py3.11-torch2.5-cu124: python 3.11, torch 2.5
+  ok   image py3.10-torch2.1-cu121: python 3.10, torch 2.1
+  ok   image py3.10-torch1.13-cu117: python 3.10, torch 1.13
+  ok   image py3.7-torch1.12-cu113: python 3.7, torch 1.12
+  ok   image py3.7-torch1.10-cu111: python 3.7, torch 1.10
+  ok   image py3.8-torch1.7-cu110: python 3.8, torch 1.7
+  ok   llm balance: 14.15 (minimum 0)
