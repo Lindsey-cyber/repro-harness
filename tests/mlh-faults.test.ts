@@ -385,14 +385,20 @@ describe("P1: declared system layers, host memory and data links reach the stage
 
 describe("P2: a GPU type without capacity", () => {
   it("the stage moves to the next cheapest GPU with enough memory in the same attempt, and records it", async () => {
-    const ws = workspace([{ when: STAGE, gpu: "L4", nth: [1, 2, 3], error: "RuntimeError: ResourceExhaustedError: Insufficient capacity to create sandbox." }]);
+    const ws = workspace([{ when: "^python3 train\\.py --steps 100 --seed", gpu: "L4", nth: [1, 2, 3], error: "RuntimeError: ResourceExhaustedError: Insufficient capacity to create sandbox." }]);
     const s = canaryScript();
-    (s.plan[0]!.args as { stages: Record<string, unknown>[] }).stages[0]!.gpu = "L4";
+    const pa = s.plan[0]!.args as { seeds: number[]; stages: Record<string, unknown>[] };
+    pa.stages[0]!.gpu = "L4"; pa.seeds = [0, 1]; pa.stages[0]!.perSeed = true; pa.stages[0]!.argv = ["python3", "train.py", "--steps", "100", "--seed", "{seed}"];
     await run(ws, s);
     expect(claims(ws.runDir)).toEqual(CLEAN);
     const st = journal(ws.runDir).find((e) => e.t === "ok" && String(e.id).startsWith("repro.stage"));
     expect(st.output).toMatchObject({ gpu: "A10G", plannedGpu: "L4" });
     expect(journal(ws.runDir).filter((e) => e.t === "fail")).toEqual([]); // no failed attempt, no stop
+    // Later stages start on the type that worked: L4 is tried once, not once per seed.
+    const calls = readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((c) => /train\.py/.test((c.cmd as string[]).join(" ")));
+    expect(JSON.parse(readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-counts.json"), "utf8"))["0"]).toBe(1); // L4 tried once
+    expect(calls.filter((c) => c.gpu === "L4")).toHaveLength(0);
+    expect(calls.filter((c) => c.gpu === "A10G").length).toBeGreaterThan(1);
   }, 60_000);
 });
 

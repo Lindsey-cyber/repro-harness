@@ -560,8 +560,13 @@ const stage: Skill = {
     const runOn = (gpu: string | undefined) => modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(gpu ? { gpu } : {}) }, g.budget);
     // A GPU type out of capacity: the next cheapest type with enough memory, in the same attempt
     // (LoRA r3: L4 queued 20 min, then "Insufficient capacity").
-    let r = await runOn(st.gpu), ranOn = st.gpu;
-    for (const alt of st.gpu ? fallbackGpus(st.gpu, st.gpuMemGB) : []) {
+    // Sticky within a run: once a stage of this run had to leave the planned type, later stages start
+    // where it succeeded (LoRA r3: each RTE seed queued ~20 min on L4 before falling back to A10G).
+    const fell = [...ctx.state.order].reverse().map((id) => ctx.state.nodes.get(id)!).find((n) => n.status === "succeeded" && n.node.skill === ctx.node.skill && (n.output as { plannedGpu?: string } | undefined)?.plannedGpu === st.gpu)?.output as { gpu: string } | undefined;
+    const ladder = st.gpu ? [st.gpu, ...fallbackGpus(st.gpu, st.gpuMemGB)] : [];
+    const from = fell ? Math.max(0, ladder.indexOf(fell.gpu)) : 0;
+    let r = await runOn(ladder[from] ?? st.gpu), ranOn = ladder[from] ?? st.gpu;
+    for (const alt of ladder.slice(from + 1)) {
       if (!(r.category === "provider_transient" && /capacity/i.test(r.stderr))) break;
       ranOn = alt;
       r = await runOn(alt);
