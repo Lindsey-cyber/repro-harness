@@ -134,7 +134,8 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     sites: siteManager(resolve(o.sitesDir ?? ".mlh/sites"), { isolation: st.isolation, stats }),
     versionDir: (v: number) => (v === 0 ? srcDir : join(runDir, "versions", `v${v}`)),
     // Spending is saved next to the journal, so a resumed run continues from what it already spent.
-    ...(gpuBudget ? { gpu: { budget: new Budget(gpuBudget, join(runDir, "budget.json")), runKey: createHash("sha256").update(readFileSync(join(runDir, "run.json"), "utf8")).digest("hex").slice(0, 12) } } : {}),
+    // Each run gets its own /cache volume, named by the run's key: runs cannot see each other's leftovers.
+    ...(gpuBudget ? (() => { const runKey = createHash("sha256").update(readFileSync(join(runDir, "run.json"), "utf8")).digest("hex").slice(0, 12); return { gpu: { budget: new Budget(gpuBudget, join(runDir, "budget.json"), `mlh-run-${runKey}`), runKey } }; })() : {}),
   } : undefined;
   const specs = mode === "repro" ? SKILLS.filter((s) => s.id.startsWith("repro."))
     : SKILLS.filter((s) => !s.id.startsWith("repro.") && (o.llm || !s.actions.includes("model_query")) && (mode === "agentic" || (s.id !== AGENT && !s.id.startsWith("verify."))) && (mode !== "agentic" || !s.id.startsWith("llm.")));

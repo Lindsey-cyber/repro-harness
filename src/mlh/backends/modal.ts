@@ -52,7 +52,8 @@ export class Budget {
   // Spend per node attempt, so failed attempts and retries can be priced separately.
   byAttempt: Record<string, number> = {};
   // With a file, spending survives a crash: a resumed run continues from what it already spent.
-  constructor(readonly limitUsd: number, private readonly file?: string) {
+  // volume: the run's own /cache volume (isolation: nothing one run leaves behind reaches another).
+  constructor(readonly limitUsd: number, private readonly file?: string, readonly volume = "mlh-cache") {
     if (file && existsSync(file)) {
       try {
         const j = JSON.parse(readFileSync(file, "utf8")) as { spent?: number; reserved?: number; byAttempt?: Record<string, number> };
@@ -174,7 +175,7 @@ export async function modalRun(run: RemoteRun, budget: Budget): Promise<RemoteRe
 
 async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteResult> {
   // An image with new pip packages takes a few minutes to build the first time.
-  const r = await call({ op: "run", repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [], domains: run.domains ?? [] }, (run.timeoutS + 2400) * 1000);
+  const r = await call({ op: "run", cache_volume: budget.volume, repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [], domains: run.domains ?? [] }, (run.timeoutS + 2400) * 1000);
   if (!r.ok) {
     const e = String(r.error);
     const head = e.split("\n")[0]!; // classify the exception, not a build log that mentions "tokenizers"

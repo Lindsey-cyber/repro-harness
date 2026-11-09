@@ -62,7 +62,8 @@ Accounting gaps found while writing this:
 | Mutation check | done | 17 of 17 reintroduced bugs are caught by the suite (`bench/complex/results/reliability/mutations-2026-11-09.txt`) |
 | P4 live canary | **pass** | doctor PASS; canary reproduced exactly on real Modal (image, /cache, T4) in 4 of 4 runs, one killed after 4 nodes and resumed; about $0.001 per run |
 | P5 attempt 1 | **failed**, stopped after run 1 | Run 1 (10 min, $0.08) ended without a verdict: the validator allowed https only, so the planner wrote `https://images.cocodataset.org/...`, a host whose certificate does not match (it serves http). Fixed: http allowed with a sha256 (verified by the fetch); every declared URL is probed during planning and an unreachable one is a plan rejection the planner sees; deterministic fetch failures are the planner's, transient ones are retried; the driver now stops at the first run without a definitive verdict |
-| P5 attempt 2 | running | DETR, 3 clean + 2 killed-and-resumed, sequential, from scratch |
+| P5 attempt 2 | **stopped at 5 min** by the 5-minute review | The env agent spent steps 11-22 looking for the repository: "read-only" commands ran in the local sandbox and the rest remotely, two filesystem views (a speed optimization worth 2.4 s per call). It also read other runs' leftovers in the shared /cache volume. Fixed: every command of a remote agent runs remotely; each run gets its own /cache volume (`mlh-run-<runKey>`), so nothing one run leaves reaches another; the env cache is off unless configured; watchdog silence 30 min (was 2 h). Live canary re-passed with per-run volumes |
+| P5 attempt 3 | running | DETR, 3 clean + 2 killed-and-resumed, sequential, reviewed every 5 min |
 
 Offline suite: 21 files, 168 tests, all passing.
 

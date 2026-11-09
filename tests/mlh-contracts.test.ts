@@ -106,15 +106,15 @@ describe("campaign summary", () => {
 });
 
 describe("campaign watchdog", () => {
-  it("allows 2 h of silence normally (agents write no journal events), and a running stage's full modal wait while it runs", () => {
+  it("allows 30 min of silence normally (agents write no journal events), and a running stage's full modal wait while it runs", () => {
     const d = tmp();
     const plan = { t: "ok", at: "t", id: "repro.plan", output: { gpuPlan: { stages: [{ id: "train", timeoutS: 5400 }] } } };
     writeFileSync(join(d, "journal.jsonl"), [plan, { t: "start", at: "t", id: "repro.env" }, { t: "ok", at: "t", id: "repro.env" }].map((x) => JSON.stringify(x)).join("\n"));
-    expect(allowedSilenceMs(d)).toBe(2 * 3600_000);
+    expect(allowedSilenceMs(d)).toBe(30 * 60_000);
     writeFileSync(join(d, "journal.jsonl"), [plan, { t: "start", at: "t", id: "repro.stage:train:v0" }].map((x) => JSON.stringify(x)).join("\n"));
     expect(allowedSilenceMs(d)).toBe((5400 + 3000) * 1000);
     writeFileSync(join(d, "journal.jsonl"), [plan, { t: "start", at: "t", id: "repro.stage:train:v0" }, { t: "ok", at: "t", id: "repro.stage:train:v0" }].map((x) => JSON.stringify(x)).join("\n"));
-    expect(allowedSilenceMs(d)).toBe(2 * 3600_000);
+    expect(allowedSilenceMs(d)).toBe(30 * 60_000);
   });
 
   it("counts an agent's checkpoint writes as progress, not only the journal", async () => {

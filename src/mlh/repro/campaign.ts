@@ -46,7 +46,8 @@ export function allowedSilenceMs(runDir: string): number {
   for (const e of ev) if (e.t === "ok" || e.t === "fail") started.delete(e.id);
   // Agent nodes write no journal events while they work (their checkpoints count as progress, see
   // lastProgressMs); a single remote command may take an hour plus an image build.
-  let max = 2 * 3600_000;
+  // 30 min: agents checkpoint every step (each command is capped at 20 min); a GPU stage gets its timeout below.
+  let max = 30 * 60_000;
   const plan = ev.find((e) => e.t === "ok" && e.id === "repro.plan") as { output?: { gpuPlan?: { stages: { id: string; timeoutS: number }[] } } } | undefined;
   for (const id of started) {
     const st = plan?.output?.gpuPlan?.stages.find((s) => id?.startsWith(`repro.stage:${s.id}:`));

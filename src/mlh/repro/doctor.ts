@@ -37,7 +37,7 @@ export function doctorFresh(maxAgeMs = 24 * 3600_000): Doctor | undefined {
 export async function runDoctor(o: { llmBalance: () => Promise<number | undefined>; minLlmBalance: number }): Promise<Doctor> {
   const dir = join(ROOT, ".mlh", "campaign", "_doctor", new Date().toISOString().slice(0, 10));
   mkdirSync(join(dir, "repo"), { recursive: true });
-  const budget = new Budget(2, join(dir, "budget.json")); // counted by the campaign's Modal ledger
+  const budget = new Budget(2, join(dir, "budget.json"), "mlh-doctor"); // counted by the campaign's Modal ledger
   const probe = 'python -c "import sys, torch; print(\'MLH_PROBE py=%d.%d.%d torch=%s\' % (sys.version_info[:3] + (torch.__version__,)))"';
   const checks: Check[] = await Promise.all(Object.entries(IMAGES).map(async ([key, image]) => {
     const r = await modalRun({ repo: join(dir, "repo"), cmd: ["bash", "-lc", probe], timeoutS: 900, network: false, image }, budget);

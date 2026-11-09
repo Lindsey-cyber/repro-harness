@@ -4,6 +4,7 @@
 // same way the team's results are: the harness reruns each claim's reported
 // command once in a fresh container and applies the same status rule, so both
 // systems are scored on independently re-derived numbers, not on self-reports.
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { agentLoop, type Role } from "../agentloop.ts";
@@ -46,7 +47,7 @@ ${CAUSES}`,
 export async function runSolo(o: { source: string; arxiv: string; objective: string; budgetUsd: number; runDir: string }): Promise<void> {
   const runDir = resolve(o.runDir);
   mkdirSync(runDir, { recursive: true });
-  const budget = new Budget(o.budgetUsd, join(runDir, "budget.json"));
+  const budget = new Budget(o.budgetUsd, join(runDir, "budget.json"), `mlh-solo-${createHash("sha256").update(runDir).digest("hex").slice(0, 12)}`);
   const st = await selfTest(join(runDir, "selftest"));
   // The paper, extracted in the sandbox like the team's paper node.
   const pdf = join(runDir, "paper.pdf");

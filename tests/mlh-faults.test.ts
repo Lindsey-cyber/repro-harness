@@ -220,3 +220,19 @@ describe("P1: data fetch path", () => {
     expect(journal(ws.runDir).some((e) => e.t === "fail" && e.id === "repro.fetch")).toBe(true);
   }, 60_000);
 });
+
+describe("P1: run isolation", () => {
+  it("each run uses its own /cache volume, never the shared one", async () => {
+    const vols: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const ws = workspace();
+      await run(ws);
+      const calls = readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l).volume as string);
+      expect(new Set(calls).size).toBe(1);
+      vols.push(calls[0]!);
+    }
+    expect(vols[0]).toMatch(/^mlh-run-[0-9a-f]{12}$/);
+    expect(vols[1]).toMatch(/^mlh-run-[0-9a-f]{12}$/);
+    expect(vols[0]).not.toBe(vols[1]);
+  }, 60_000);
+});
