@@ -344,3 +344,37 @@ describe("P1: {seed} in a per-seed stage's command", () => {
     expect(calls.some((c) => c.includes("{seed}"))).toBe(false);
   }, 60_000);
 });
+
+describe("P1: declared system layers, host memory and data links reach the stage", () => {
+  const URL = "https://huggingface.co/datasets/canary/resolve/main/labels.txt";
+  it("system from the env agent's install, memGB and links from the plan are in every stage call; the link resolves", async () => {
+    const ws = workspace();
+    ws.env.MLH_FAKE_DATA = JSON.stringify({ [URL]: "0 1 0 1 0 1 0 1 0 1" });
+    const s = canaryScript();
+    s.env = [{ name: "install", args: { system: ["apt-get update && apt-get install -y g++"] } }, ...s.env];
+    const plan = structuredClone(s.plan[0]!.args) as Record<string, unknown> & { stages: Record<string, unknown>[] };
+    plan.fetch = [{ url: URL, to: "/cache/data/canary/labels.txt" }];
+    plan.stages = [{ id: "train", argv: ["python3", "train.py", "--steps", "100", "--data", "data/labels.txt"], cwd: "/work", timeoutS: 300, gpu: "T4", memGB: 32, links: [{ path: "data/labels.txt", to: "/cache/data/canary/labels.txt" }] }];
+    s.plan = [{ name: "report", args: plan }];
+    await run(ws, s);
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+    const calls = readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const stage = calls.find((c) => (c.cmd as string[]).join(" ").endsWith("--data data/labels.txt"));
+    expect(stage).toMatchObject({ system: ["apt-get update && apt-get install -y g++"], memory_mb: 32768, links: [{ path: "data/labels.txt", to: "/cache/data/canary/labels.txt" }] });
+    const smoke = calls.find((c) => (c.cmd as string[]).join(" ").includes("MLH_SMOKE_EXIT"));
+    expect(smoke.system).toEqual(["apt-get update && apt-get install -y g++"]);
+    expect(journal(ws.runDir).find((e) => e.t === "ok" && e.id === "repro.env").output.system).toEqual(["apt-get update && apt-get install -y g++"]);
+  }, 60_000);
+  it("the planner's check_plan has a budget of 8", async () => {
+    const ws = workspace();
+    const s = canaryScript();
+    const real = s.plan[0]!;
+    s.plan = [...Array.from({ length: 9 }, () => ({ name: "check_plan", args: real.args })), real];
+    await run(ws, s);
+    const st = JSON.parse(readFileSync(join(ws.runDir, "work", "repro.plan", "state.json"), "utf8"));
+    const answers = st.messages.filter((m: { role: string; content?: string }) => m.role === "tool").map((m: { content: string }) => m.content);
+    expect(answers.filter((a: string) => a.startsWith("OK:"))).toHaveLength(8);
+    expect(answers.some((a: string) => /8-check budget is used up/.test(a))).toBe(true);
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+  }, 60_000);
+});

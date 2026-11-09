@@ -36,7 +36,7 @@ def main():
                     return {"ok": True, "exit_code": f["exit"], "stdout": "", "stderr": f.get("stderr", ""), "elapsed_s": elapsed, "files": {}}
                 return {"ok": False, "error": f["error"], "elapsed_s": elapsed}
     with open(os.path.join(cache, ".fake-calls.jsonl"), "a") as log:
-        log.write(json.dumps({"cmd": cmd, "gpu": req.get("gpu"), "image": req.get("image"), "pip": req.get("pip"), "volume": req.get("cache_volume")}) + "\n")
+        log.write(json.dumps({"cmd": cmd, "gpu": req.get("gpu"), "image": req.get("image"), "pip": req.get("pip"), "volume": req.get("cache_volume"), "system": req.get("system"), "memory_mb": req.get("memory_mb"), "links": req.get("links")}) + "\n")
     work = tempfile.mkdtemp(prefix="fake-work-")
     try:
         shutil.copytree(req["repo"], work, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git"))
@@ -45,6 +45,10 @@ def main():
             src, dst = m(r["from"]), os.path.join(work, r["to"])
             if os.path.exists(src):
                 shutil.rmtree(dst, ignore_errors=True); shutil.copytree(src, dst) if os.path.isdir(src) else shutil.copy(src, dst)
+        for l in req.get("links") or []:
+            dst = os.path.join(work, l["path"]); os.makedirs(os.path.dirname(dst) or work, exist_ok=True)
+            if os.path.lexists(dst): os.remove(dst) if not os.path.isdir(dst) or os.path.islink(dst) else shutil.rmtree(dst)
+            os.symlink(m(l["to"]), dst)
         env = {**os.environ, **{k: m(str(v)) for k, v in (req.get("env") or {}).items()}}
         argv = [m(a) for a in cmd]
         if len(argv) > 1 and argv[1] == "fetch_data.py":

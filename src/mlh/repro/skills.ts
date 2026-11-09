@@ -62,6 +62,8 @@ export function currentSite(s: RunState): string | undefined {
 
 // Agents' commands run in remote containers when the run uses Modal: network allowed (they install and
 // download while exploring), no credentials inside, GPU time charged to the paper's budget.
+export const CHECK_PLAN_LIMIT = 8;
+
 // Is each declared download reachable from here? A HEAD (or a one-byte GET where HEAD is refused).
 // The error text goes back to the planner, so a wrong scheme, host or path is fixed during planning.
 // MLH_SKIP_URL_PROBE=1 for offline tests whose URLs are served by the fake runner.
@@ -84,8 +86,8 @@ export async function probeUrls(urls: string[]): Promise<string[]> {
 const remoteFor = (ctx: SkillCtx, pip: string[], image?: string) => {
   const g = need(ctx).gpu;
   if (!g) return {};
-  return { remote: { pip, gpus: GPUS, images: IMAGES, image: image ?? DEFAULT_IMAGE_KEY, run: async (ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[]; image?: string }) => {
-    const r = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: o.timeoutS, network: true, pip: o.pip, image: IMAGES[o.image ?? DEFAULT_IMAGE_KEY]!, ...(o.gpu ? { gpu: o.gpu } : {}) }, g.budget);
+  return { remote: { pip, system: systemOf(ctx.state), gpus: GPUS, images: IMAGES, image: image ?? DEFAULT_IMAGE_KEY, run: async (ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[]; image?: string; system?: string[] }) => {
+    const r = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: o.timeoutS, network: true, pip: o.pip, system: o.system ?? [], image: IMAGES[o.image ?? DEFAULT_IMAGE_KEY]!, ...(o.gpu ? { gpu: o.gpu } : {}) }, g.budget);
     if (r.category === "provider_fatal") throw new SkillError("provider_fatal", r.stderr.slice(0, 300)); // out of GPU credit: stop, do not let the agent keep trying
     return { code: r.exitCode, stdout: r.stdout, stderr: r.stderr, category: r.category, costUsd: r.costUsd };
   } } };
@@ -95,6 +97,13 @@ export const imageOf = (s: RunState): string => {
   for (const id of s.order) if (id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded") { const p = s.nodes.get(id)!.output as { accepted: boolean; image?: string }; if (p.accepted && p.image) img = p.image; }
   return img;
 };
+// Image build commands (system packages, toolchains) the environment declared, as patched since.
+export const systemOf = (s: RunState): string[] => {
+  let sys = (s.nodes.get(N.env)?.output as { system?: string[] } | undefined)?.system ?? [];
+  for (const id of s.order) if (id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded") { const p = s.nodes.get(id)!.output as { accepted: boolean; system?: string[] }; if (p.accepted && p.system) sys = p.system; }
+  return sys;
+};
+
 export const pipOf = (s: RunState): string[] => {
   let pip = (s.nodes.get(N.env)?.output as { pip?: string[] } | undefined)?.pip ?? [];
   for (const id of s.order) if (id.startsWith(N.patch) && s.nodes.get(id)?.status === "succeeded") { const p = s.nodes.get(id)!.output as { accepted: boolean; pip?: string[] }; if (p.accepted && p.pip) pip = p.pip; }
@@ -177,7 +186,7 @@ export function smokeVerdict(exit: number | null, output: string): { ok: boolean
   return { ok: false, why: `the command exited with status ${exit}` };
 }
 
-async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string, string>; example_command?: string[] } | undefined, pip: string[], site: string | undefined, image?: string): Promise<{ ok: boolean; why: string; command: string; tail: string }> {
+async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string, string>; example_command?: string[] } | undefined, pip: string[], site: string | undefined, image?: string, system: string[] = []): Promise<{ ok: boolean; why: string; command: string; tail: string }> {
   const argv = Array.isArray(launch?.example_command) ? launch!.example_command.map(String) : [];
   if (!argv.length) return { ok: false, why: "the environment agent gave no launch command", command: "", tail: "" };
   const env = Object.fromEntries(Object.entries(launch?.env ?? {}).filter(([k, v]) => /^[A-Z_][A-Z0-9_]*$/.test(k) && typeof v === "string" && !/^(PATH|HOME|LD_|PYTHONHOME)/.test(k))) as Record<string, string>;
@@ -186,7 +195,7 @@ async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string,
   const g = need(ctx).gpu;
   let out: string, err: string;
   if (g) {
-    const r = await modalRun({ repo: need(ctx).versionDir(0), cmd: script, gpu: "T4", timeoutS: SMOKE_S + 600, pip, env, network: true, image: IMAGES[image ?? DEFAULT_IMAGE_KEY]! }, g.budget);
+    const r = await modalRun({ repo: need(ctx).versionDir(0), cmd: script, system, gpu: "T4", timeoutS: SMOKE_S + 600, pip, env, network: true, image: IMAGES[image ?? DEFAULT_IMAGE_KEY]! }, g.budget);
     // A transport/budget failure is not a verdict on the environment: retry the node instead. (A failed image build is a verdict.)
     if (r.exitCode === -1 && r.category && r.category !== "experiment_error") throw new SkillError(r.category, `smoke test could not run: ${r.stderr.slice(0, 300)}`);
     out = r.stdout; err = r.stderr;
@@ -218,7 +227,7 @@ const env: Skill = {
       // The environment's declared data, downloaded again into this run's own volume, then the smoke test.
       if (hit.data?.length) await harnessFetch(ctx, hit.data);
 
-      const sm = await smoke(ctx, hit.launch as never, hit.pip, undefined, hit.image);
+      const sm = await smoke(ctx, hit.launch as never, hit.pip, undefined, hit.image, (hit as { system?: string[] }).system ?? []);
       if (sm.ok) return { output: { ...hit, cached: true, smoke: { ok: true, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) } } };
     }
     // Data the agent declares is downloaded by the harness (provenance) and recorded with the environment.
@@ -245,14 +254,14 @@ const env: Skill = {
     if (!r.report) throw new SkillError("experiment_error", "environment agent ran out of steps without a report");
     // Harness-verified: the launch command must actually start. One repair round if it does not.
     const claimed = r.report.runnable === true;
-    let sm = await smoke(ctx, r.report.launch as never, r.pip, r.site, r.image);
+    let sm = await smoke(ctx, r.report.launch as never, r.pip, r.site, r.image, r.system ?? []);
     // Audited for the environment agent's trust: did its own report pass, without a repair round?
     const repaired = !sm.ok;
     if (!sm.ok) {
       const fix = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: r.steps + ENV_ROLE.maxSteps }, continueWith: `The harness started your launch command (${sm.command}) for ${SMOKE_S} s and it failed: ${sm.why}.\nOutput tail:\n${sm.tail}\nFix the environment (not the code) and report again with a launch command that starts.` });
-      if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site, r.image); }
+      if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site, r.image, r.system ?? []); }
     }
-    const output = { ...r.report, data, runnable: sm.ok, agentSaidRunnable: claimed, repaired, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps };
+    const output = { ...r.report, data, system: r.system ?? [], runnable: sm.ok, agentSaidRunnable: claimed, repaired, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps };
     if (cacheFile && sm.ok) { mkdirSync(resolve(process.env.MLH_ENV_CACHE!), { recursive: true }); writeFileSync(cacheFile, JSON.stringify(output)); }
     return { output };
   },
@@ -271,8 +280,10 @@ const plan: Skill = {
       let feedback = "";
       const src0 = need(ctx).versionDir(0);
       // The planner can run the very validator that will judge its report, before reporting.
+      let checks = 0;
       const checkPlan = { def: { type: "function" as const, function: { name: "check_plan", description: "Validate a draft plan with the harness's own rules (stage structure, scripts exist, GPU allowlist, declared data, worst-case budget). Takes the same object you would report. Returns OK or the list of problems. Use it before report.", parameters: GPU_PLAN_ROLE.report.parameters } },
-        run: async (draft: Record<string, unknown>) => { let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
+        // A budget of checks: FT-Transformer's planner probed the rules with dummy plans (stage "a", parse "x(...)").
+        run: async (draft: Record<string, unknown>) => { if (++checks > CHECK_PLAN_LIMIT) return `REJECTED: the ${CHECK_PLAN_LIMIT}-check budget is used up; call report with your best plan (the harness validates it once more)`; let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
       for (let attempt = 0; attempt < 3; attempt++) {
         const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), extraTools: [checkPlan], paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip, data: e.data })}\nData the environment declared (already downloaded into /cache/data with provenance; declare the same items in your plan's fetch, they are not downloaded twice): ${JSON.stringify(e.data ?? [])}`,
           // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
@@ -428,8 +439,8 @@ const debug: Skill = {
     const diff = changed.length ? await unifiedDiff(base, r.workspace, changed) : "";
     const argv = Array.isArray(r.report.run_argv) && r.report.run_argv.length ? (r.report.run_argv as unknown[]).map(String) : undefined;
     if (diff) { const f = join(ctx.workDir(), "patch.diff"); writeFileSync(f, diff); ctx.save("patch.diff", f); }
-    const pipChanged = need(ctx).gpu && (JSON.stringify(r.pip) !== JSON.stringify(pipOf(ctx.state)) || (r.image ?? DEFAULT_IMAGE_KEY) !== imageOf(ctx.state));
-    return { output: { claim, causes: r.report.causes ?? [], patch_intent: r.report.patch_intent ?? "", expected_effect: r.report.expected_effect ?? "", changed, diff: diff.slice(0, 30000), ...(argv ? { run_argv: argv } : {}), hasPatch: changed.length > 0 || !!argv || !!pipChanged, workspace: r.workspace, ...(r.site ? { site: r.site } : {}), ...(pipChanged ? { pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY } : {}), steps: r.steps } };
+    const pipChanged = need(ctx).gpu && (JSON.stringify(r.pip) !== JSON.stringify(pipOf(ctx.state)) || (r.image ?? DEFAULT_IMAGE_KEY) !== imageOf(ctx.state) || JSON.stringify(r.system ?? []) !== JSON.stringify(systemOf(ctx.state)));
+    return { output: { claim, causes: r.report.causes ?? [], patch_intent: r.report.patch_intent ?? "", expected_effect: r.report.expected_effect ?? "", changed, diff: diff.slice(0, 30000), ...(argv ? { run_argv: argv } : {}), hasPatch: changed.length > 0 || !!argv || !!pipChanged, workspace: r.workspace, ...(r.site ? { site: r.site } : {}), ...(pipChanged ? { pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, system: r.system ?? [] } : {}), steps: r.steps } };
   },
 };
 
@@ -492,7 +503,7 @@ const stage: Skill = {
     });
     const persist = st.persist.map((path) => ({ from: path, to: `${area(st, seed)}/${path}` }));
     const cmd = st.cwd ? ["bash", "-c", 'cd "$1" && shift && exec "$@"', "bash", st.cwd, ...argv] : argv;
-    const r = await modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(st.gpu ? { gpu: st.gpu } : {}) }, g.budget);
+    const r = await modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS: st.timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(st.gpu ? { gpu: st.gpu } : {}) }, g.budget);
     const log = join(ctx.workDir(), `${ctx.node.id.replace(/[^\w.-]+/g, "_")}.log`);
     mkdirSync(ctx.workDir(), { recursive: true });
     writeFileSync(log, `$ ${cmd.join(" ")}\n--- stdout\n${r.stdout.slice(-30000)}\n--- stderr\n${r.stderr.slice(-20000)}`);

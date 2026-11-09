@@ -88,3 +88,21 @@ describe("argv placeholders", async () => {
     expect(v({ argv: ["python", "a.py", "{dataset}"], perSeed: true })).toMatch(/unknown placeholder \{dataset\}/);
   });
 });
+
+describe("memGB and links in a stage", async () => {
+  const { validateGpuPlan } = await import("../src/mlh/repro/gpu.ts");
+  const { gpuPrice } = await import("../src/mlh/backends/modal.ts");
+  const fetch = [{ url: "https://huggingface.co/x/data.tar", to: "/cache/data/x", unpack: "tar" }];
+  const v = (stage: Record<string, unknown>, f = fetch) => validateGpuPlan([{ id: "c", metric: "acc", value: 0.9 }] as never, { fidelity: "full", fetch: f, stages: [{ id: "s", argv: ["python", "a.py"], timeoutS: 300, ...stage }], claims: [{ claim: "c", stage: "s", parse: "acc: ([0-9.]+)" }] }, { budgetUsd: 5, price: gpuPrice });
+  it("accepts a link to fetched data and a memory request, and prices the memory", () => {
+    const r = v({ memGB: 64, links: [{ path: "data", to: "/cache/data/x/data" }] });
+    expect(r.errors).toEqual([]);
+    expect(r.plan!.worstCaseUsd).toBeGreaterThan(v({}).plan!.worstCaseUsd);
+  });
+  it("rejects links outside the repo, to unfetched data, and absurd memory", () => {
+    expect(v({ links: [{ path: "../x", to: "/cache/data/x" }] }).errors.join()).toMatch(/link/);
+    expect(v({ links: [{ path: "data", to: "/cache/other" }] }).errors.join()).toMatch(/link/);
+    expect(v({ links: [{ path: "data", to: "/cache/data/y" }] }).errors.join()).toMatch(/\/cache\/data\/y is not produced by any fetch item/);
+    expect(v({ memGB: 1000 }).errors.join()).toMatch(/memGB/);
+  });
+});

@@ -43,10 +43,14 @@ def tar_dir(path):
     return buf.getvalue()
 
 
-def image_for(base, pip):
-    key = (base, tuple(pip))
+def image_for(base, pip, system=()):
+    key = (base, tuple(pip), tuple(system))
     if key not in _images:
         img = modal.Image.from_registry(base)
+        # System packages and toolchains the environment declared (e.g. a C++ compiler): image layers,
+        # cached by Modal, so every stage and smoke test gets the same environment without re-installing.
+        if system:
+            img = img.run_commands(*system)
         # torch is already in the default base image; other torch-family wheels come from the CUDA index.
         if pip:
             img = img.pip_install(*pip)
@@ -61,12 +65,14 @@ def op_check(_req):
 
 def op_run(req):
     app = modal.App.lookup(APP, create_if_missing=True)
-    image = image_for(req.get("image") or DEFAULT_IMAGE, req.get("pip") or [])
+    image = image_for(req.get("image") or DEFAULT_IMAGE, req.get("pip") or [], req.get("system") or [])
     vol = modal.Volume.from_name(req.get("cache_volume") or "mlh-cache", create_if_missing=True)
     kwargs = dict(app=app, image=image, timeout=int(req["timeout_s"]) + 600, volumes={"/cache": vol},
                   block_network=not req.get("network", False))
     if req.get("gpu"):
         kwargs["gpu"] = req["gpu"]
+    if req.get("memory_mb"):
+        kwargs["memory"] = int(req["memory_mb"])  # host RAM the plan asked for (GraphSAINT PPI-edge was OOM-killed)
     if req.get("network") and req.get("domains"):
         kwargs["outbound_domain_allowlist"] = req["domains"]  # network restricted to data hosts
     t0 = time.time()
@@ -86,7 +92,8 @@ def op_run(req):
         def put(src, dst):
             q, d = shlex.quote(src), shlex.quote(dst)
             return f"rm -rf {d} && mkdir -p $(dirname {d}) && cp -a {q} {d}"
-        pre = " && ".join(put(r["from"], "/work/" + r["to"]) for r in (req.get("restore") or [])) or "true"
+        pre = " && ".join([put(r["from"], "/work/" + r["to"]) for r in (req.get("restore") or [])]
+                          + [f"mkdir -p $(dirname {shlex.quote('/work/' + l['path'])}) && ln -sfn {shlex.quote(l['to'])} {shlex.quote('/work/' + l['path'])}" for l in (req.get("links") or [])]) or "true"
         # A declared output that the command did not produce is reported, never skipped silently.
         def keep(src, dst):
             q = shlex.quote(src)

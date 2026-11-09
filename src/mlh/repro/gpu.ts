@@ -80,6 +80,8 @@ export interface Stage {
   network?: boolean; // only for fetching data or checkpoints
   perSeed?: boolean;
   gpuMemGB?: number; // stated need: the harness picks the cheapest GPU that fits
+  memGB?: number; // host RAM for the container (default Modal size otherwise)
+  links?: { path: string; to: string }[]; // repo-relative symlinks to fetched data, made before the command
   env?: Record<string, string>;
   cwd?: string;
 }
@@ -103,7 +105,7 @@ export interface GpuPlan {
 const INTERP = /^(.*\/)?(python[\d.]*|sh|bash|zsh|dash)$/;
 const INLINE = (argv: string[]) => INTERP.test(argv[0] ?? "") && argv.slice(1).some((a) => /^-[a-zA-Z]*c$/.test(a));
 
-export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number; cpu?: number; exists?: (path: string) => boolean }): { plan?: GpuPlan; errors: string[] } {
+export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: number; price: (gpu: string) => number; cpu?: number; mem?: number; exists?: (path: string) => boolean }): { plan?: GpuPlan; errors: string[] } {
   const errors: string[] = [];
   const r = raw as Partial<GpuPlan> & { stages?: Partial<Stage>[]; claims?: { claim?: string; stage?: string; parse?: string; scale?: number }[] };
   if (!r || !Array.isArray(r.stages) || !r.stages.length) return { errors: ["plan has no stages"] };
@@ -150,8 +152,14 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
       if (!fit) { errors.push(`${id}: no GPU has ${mem} GB`); continue; }
       gpu = fit;
     }
+    const memGB = Number((s as { memGB?: unknown }).memGB);
+    if ((s as { memGB?: unknown }).memGB !== undefined && !(memGB >= 1 && memGB <= 256)) { errors.push(`${id}: memGB must be between 1 and 256`); continue; }
+    const rawLinks = Array.isArray((s as { links?: unknown }).links) ? ((s as { links: { path?: unknown; to?: unknown }[] }).links) : [];
+    const links = rawLinks.map((l) => ({ path: String(l.path ?? ""), to: String(l.to ?? "") }));
+    const badLink = links.find((l) => !l.path || l.path.startsWith("/") || l.path.split("/").includes("..") || !l.to.startsWith("/cache/data/"));
+    if (badLink) { errors.push(`${id}: link ${JSON.stringify(badLink)} must be {path: <repo-relative>, to: "/cache/data/..."}`); continue; }
     seen.add(id);
-    stages.push({ id, argv: s.argv, timeoutS, needs, persist, ...(gpu ? { gpu } : {}), ...(mem > 0 ? { gpuMemGB: mem } : {}), ...(s.network ? { network: true } : {}), ...(s.perSeed ? { perSeed: true } : {}),
+    stages.push({ id, argv: s.argv, timeoutS, needs, persist, ...(memGB > 0 ? { memGB } : {}), ...(links.length ? { links } : {}), ...(gpu ? { gpu } : {}), ...(mem > 0 ? { gpuMemGB: mem } : {}), ...(s.network ? { network: true } : {}), ...(s.perSeed ? { perSeed: true } : {}),
       ...(s.env && typeof s.env === "object" ? { env: Object.fromEntries(Object.entries(s.env).filter(([k, v]) => /^[A-Z_][A-Z0-9_]*$/.test(k) && typeof v === "string" && !/^(PATH|HOME|LD_|PYTHONHOME)/.test(k))) as Record<string, string> } : {}),
       ...(cwd !== undefined ? { cwd } : {}) });
   }
@@ -174,7 +182,7 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     // The whole volume is not an input: it would hand a stage whatever any earlier command left there
     // (FT-Transformer r2: PROJECT_DIR=/cache read data the env agent downloaded, unrecorded).
     if ([...st.argv, ...Object.values(st.env ?? {}), st.cwd ?? ""].some((a) => /^\/cache\/?$|^\/cache\/data\/?$/.test(a))) errors.push(`${st.id}: a stage may not use the whole /cache or /cache/data; point it at the directory a fetch item fills (e.g. /cache/data/<name>, with unpack)`);
-    for (const ref of [...st.argv, ...Object.values(st.env ?? {})].flatMap((a) => a.match(/\/cache\/[\w./-]+/g) ?? [])) {
+    for (const ref of [...st.argv, ...Object.values(st.env ?? {}), ...(st.links ?? []).map((l) => l.to)].flatMap((a) => a.match(/\/cache\/[\w./-]+/g) ?? [])) {
       // No traversal: "/cache/runs/../data/x" or "/cache/data/a/../../etc" would escape every rule below.
       if (ref.split("/").includes("..")) { errors.push(`${st.id}: ${ref}: ".." is not allowed in /cache paths`); continue; }
       if (ref.startsWith("/cache/runs/")) continue;
@@ -209,7 +217,7 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   const seeds = [...new Set((Array.isArray(r.seeds) ? r.seeds : [0]).filter((x) => Number.isInteger(x)))].slice(0, 5);
   if (!seeds.length) seeds.push(0);
   // Worst case: every stage instance runs to its timeout, plus container start-up.
-  const worstCaseUsd = stages.reduce((a, s) => a + (s.gpu ? (o.price(s.gpu) * (s.timeoutS + 300)) / 3600 : ((o.cpu ?? 0.1) * (s.timeoutS + 300)) / 3600) * (s.perSeed ? seeds.length : 1), 0);
+  const worstCaseUsd = stages.reduce((a, s) => a + ((s.gpu ? (o.price(s.gpu) * (s.timeoutS + 300)) / 3600 : ((o.cpu ?? 0.1) * (s.timeoutS + 300)) / 3600) + ((s.memGB ?? 0) * (o.mem ?? 0.008) * (s.timeoutS + 300)) / 3600) * (s.perSeed ? seeds.length : 1), 0);
   if (worstCaseUsd > o.budgetUsd) errors.push(`worst-case cost $${worstCaseUsd.toFixed(2)} exceeds the budget $${o.budgetUsd.toFixed(2)}: lower fidelity, shorter timeouts, fewer seeds or a cheaper GPU`);
   // Every stage must serve a claim, directly or as something a claim's stage needs (FT-Transformer r2:
   // 30 stages planned, 2 read by claims, ~2.5 h of GPU for nothing).

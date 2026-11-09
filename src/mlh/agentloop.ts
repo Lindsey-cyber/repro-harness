@@ -47,8 +47,9 @@ export interface LoopOptions {
   // Remote execution (e.g. Modal): `run` uploads the working copy and runs there (optionally on a GPU);
   // `install` adds packages to the remote image instead of a local site.
   remote?: {
-    run(ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[]; image?: string }): Promise<{ code: number; stdout: string; stderr: string; category: string | null; costUsd: number }>;
+    run(ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[]; image?: string; system?: string[] }): Promise<{ code: number; stdout: string; stderr: string; category: string | null; costUsd: number }>;
     pip: string[]; // initial package list
+    system?: string[]; // initial image build commands
     gpus: string[]; // GPU types the role may ask for
     images?: Record<string, string>; // base images the role may choose (key -> registry image)
     image?: string; // initial image key
@@ -57,6 +58,7 @@ export interface LoopOptions {
 
 export interface LoopResult {
   report: Record<string, unknown> | null;
+  system?: string[];
   steps: number;
   sandboxRuns: number;
   sandboxMs: number;
@@ -95,7 +97,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   if (!st) {
     rmSync(ws, { recursive: true, force: true });
     cpSync(o.source, ws, { recursive: true, filter: (p) => !/\/(\.git|__pycache__)(\/|$)/.test(p) });
-    st = { messages: [{ role: "system", content: o.role.system }, { role: "user", content: o.task }], step: 0, stats: { runs: 0, ms: 0 }, ...(o.site ? { site: o.site } : {}), ...(o.remote ? { pip: [...o.remote.pip], ...(o.remote.image ? { image: o.remote.image } : {}) } : {}) };
+    st = { messages: [{ role: "system", content: o.role.system }, { role: "user", content: o.task }], step: 0, stats: { runs: 0, ms: 0 }, ...(o.site ? { site: o.site } : {}), ...(o.remote ? { pip: [...o.remote.pip], ...(o.remote.image ? { image: o.remote.image } : {}), ...(o.remote.system?.length ? { system: [...o.remote.system] } : {}) } : {}) };
   }
   const state = st;
   if (o.continueWith && resumedAt !== undefined) state.messages = [...state.messages, { role: "user", content: o.continueWith }];
@@ -108,11 +110,11 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   };
   const remoteDefs: Partial<Record<ToolName, ToolDef>> = o.remote ? {
     run: { type: "function", function: { name: "run", description: `Run a shell command in the repository root inside a remote sandbox (Linux, CUDA PyTorch 2.5.1 plus the packages installed so far). Omit gpu for CPU (cheap); gpu one of ${o.remote.gpus.join(", ")} costs money from the paper's budget. Your local edits are uploaded on every call; files the command writes are NOT kept, except under /cache (a persistent volume). Returns exit code and output tails.`, parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer" }, gpu: { type: "string" } }, required: ["command"] } } },
-    install: { type: "function", function: { name: "install", description: `Set the remote environment: optionally a base image (old repositories need old Python/PyTorch: ${Object.keys(o.remote.images ?? {}).join(", ")}; default ${o.remote.image ?? "py3.11-torch2.5-cu124"}) and pip requirement specifiers (e.g. 'transformers==4.30.2'). A specifier replaces any earlier one for the same package; '-name' removes a package. Later runs use the result; run something after changing it.`, parameters: { type: "object", properties: { packages: { type: "array", items: { type: "string" } }, image: { type: "string" } }, required: [] } } },
+    install: { type: "function", function: { name: "install", description: `Set the remote environment: optionally a base image (old repositories need old Python/PyTorch: ${Object.keys(o.remote.images ?? {}).join(", ")}; default ${o.remote.image ?? "py3.11-torch2.5-cu124"}) and pip requirement specifiers (e.g. 'transformers==4.30.2'). A specifier replaces any earlier one for the same package; '-name' removes a package. Later runs use the result; run something after changing it.`, parameters: { type: "object", properties: { packages: { type: "array", items: { type: "string" } }, image: { type: "string" }, system: { type: "array", items: { type: "string" }, description: "image build commands for system packages or toolchains, e.g. 'apt-get update && apt-get install -y g++' (replaces the earlier list)" } }, required: [] } } },
   } : {};
   const defs: Record<ToolName, ToolDef> = { ...DEFS, ...remoteDefs };
   const tools = [...o.role.tools.map((t) => defs[t]), ...(o.extraTools ?? []).map((t) => t.def), { type: "function" as const, function: { name: "report", description: o.role.report.description, parameters: o.role.report.parameters } }];
-  const finish = (report: Record<string, unknown> | null, stopped: LoopResult["stopped"]): LoopResult => ({ report, steps: state.step, sandboxRuns: state.stats.runs, sandboxMs: Math.round(state.stats.ms), stopped, workspace: ws, pip: state.pip ?? [], ...(state.image ? { image: state.image } : {}), ...(state.site ? { site: state.site } : {}), ...(resumedAt !== undefined ? { resumedAt } : {}) });
+  const finish = (report: Record<string, unknown> | null, stopped: LoopResult["stopped"]): LoopResult => ({ report, steps: state.step, sandboxRuns: state.stats.runs, sandboxMs: Math.round(state.stats.ms), stopped, workspace: ws, pip: state.pip ?? [], ...(state.image ? { image: state.image } : {}), ...((state as { system?: string[] }).system?.length ? { system: (state as { system?: string[] }).system } : {}), ...(state.site ? { site: state.site } : {}), ...(resumedAt !== undefined ? { resumedAt } : {}) });
   let here = 0;
   // A run killed at its last step resumes with one step left, in which it must report.
   const limit = Math.max(o.role.maxSteps, resumedAt !== undefined ? state.step + 1 : 0);
@@ -174,7 +176,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             if (o.role.maxRunS && backgrounds(String(args.command))) { out = `refused: background processes (nohup, setsid, a trailing &) are not allowed; each command is limited to ${o.role.maxRunS} s and must finish within it`; break; }
             if (o.remote) {
               const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;
-              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(Number(args.timeout_s) || 600, o.role.maxRunS ?? 3600), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}) });
+              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(Number(args.timeout_s) || 600, o.role.maxRunS ?? 3600), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}), ...((state as { system?: string[] }).system?.length ? { system: (state as { system?: string[] }).system } : {}) });
               out = `exit ${r.category === "timeout" ? "timeout" : r.code}${r.costUsd ? ` (cost $${r.costUsd.toFixed(3)})` : ""}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.slice(-2500)}`;
               break;
             }
@@ -194,7 +196,15 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
               const ev = pk.length ? checkSpecs(pk.map((p) => p.replace(/^-/, ""))) : { ok: true, check: "" };
               if (!ev.ok) throw new Error(ev.check);
               state.pip = mergeSpecs(state.pip ?? [], pk);
-              out = `remote image: ${state.image ?? "default"}; packages: ${state.pip.join(" ") || "(none)"} (built on the next run; verify with a run)`;
+              // System packages/toolchains as image build commands (recorded with the environment, so
+              // every later stage has them: GraphSAINT's hand-installed g++ was not).
+              if (Array.isArray(args.system)) {
+                const sys = args.system.map(String).filter((c) => c.trim());
+                if (sys.length > 10 || sys.some((c) => c.length > 400 || /[\n\r]/.test(c))) throw new Error("system: at most 10 one-line commands of at most 400 characters");
+                (state as { system?: string[] }).system = sys;
+              }
+              const sy = (state as { system?: string[] }).system ?? [];
+              out = `remote image: ${state.image ?? "default"}; system: ${sy.join(" && ") || "(none)"}; packages: ${state.pip.join(" ") || "(none)"} (built on the next run; verify with a run)`;
               break;
             }
             if (!o.install) throw new Error("installing is not available");
