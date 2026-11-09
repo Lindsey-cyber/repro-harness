@@ -20,7 +20,8 @@ import { skill, SKILLS } from "./skills/registry.ts";
 import * as flow from "./repro/flow.ts";
 import { renderRepro } from "./repro/report.ts";
 import { siteManager } from "./repro/site.ts";
-import { Budget } from "./backends/modal.ts";
+import { Budget, costScope } from "./backends/modal.ts";
+import { costReport, stopCheck } from "./repro/accounting.ts";
 import { createHash } from "node:crypto";
 
 // agentic: an exploring agent node leads; its findings are routed to independent confirmers.
@@ -94,6 +95,9 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   const journal = new Journal(join(runDir, "journal.jsonl"));
   const artifacts = new ArtifactStore(join(runDir, "artifacts"));
   const srcDir = join(runDir, "source");
+  // This process's failures, for the stop conditions (a resume starts a clean count).
+  const procFails: { id: string; category: string; message: string }[] = [];
+  let stop: { reason: string; detail: string } | undefined;
   const tracePath = join(runDir, "trace.jsonl");
   let events = journal.read();
   const mode: Mode = (events.find((e) => e.t === "run") as { mode?: Mode } | undefined)?.mode ?? o.mode ?? "harness";
@@ -218,7 +222,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     };
     let outcome: string, category: string | undefined;
     try {
-      const out = await sk.run(ctx);
+      const out = await costScope.run(`${n.id}#${attempt}`, () => sk.run(ctx));
       const parsed = sk.output.safeParse(out.output);
       if (!parsed.success) throw new SkillError("contract_violation", `${sk.id}@${sk.version} output violates its schema: ${parsed.error.message.slice(0, 300)}`);
       const findings = out.findings ?? [];
@@ -242,6 +246,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
       const msg = String(e);
       const cat = e instanceof SkillError ? e.category : /LLM 40[12]\b|Insufficient Balance|invalid api key|Authentication Fails/i.test(msg) ? "provider_fatal" : /LLM|model returned/.test(msg) ? "provider_transient" : "harness_bug";
       if (cat === "provider_fatal") fatal = msg.slice(0, 300);
+      procFails.push({ id: n.id, category: cat, message: String((e as Error).message ?? e) });
       emit({ t: "fail", at: now(), id: n.id, category: cat, message: String((e as Error).message ?? e).slice(0, 2000) });
       outcome = "fail"; category = cat;
       if (state.nodes.get(n.id)!.status === "pending") {
@@ -255,14 +260,19 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
     }
     const used = models ? addUsage(models.proposer.usage, models.reviewer.usage) : zeroUsage();
     llmTotal = addUsage(llmTotal, used);
-    appendFileSync(tracePath, JSON.stringify({ at: now(), id: n.id, skill: sk.id, version: sk.version, attempt, outcome, category, ms: Math.round(performance.now() - started), sandboxRuns: stats.runs - before.runs, sandboxMs: Math.round(stats.ms - before.ms), isolation: st.isolation, llmCalls: used.calls, tokens: used.promptTokens + used.completionTokens, costUsd: Number(used.costUsd.toFixed(6)), llmMs: Math.round(used.ms) }) + "\n");
+    appendFileSync(tracePath, JSON.stringify({ at: now(), id: n.id, skill: sk.id, version: sk.version, attempt, outcome, category, ms: Math.round(performance.now() - started), sandboxRuns: stats.runs - before.runs, sandboxMs: Math.round(stats.ms - before.ms), isolation: st.isolation, llmCalls: used.calls, tokens: used.promptTokens + used.completionTokens, costUsd: Number(used.costUsd.toFixed(6)), llmMs: Math.round(used.ms), gpuUsd: Number((repro?.gpu?.budget.byAttempt[`${n.id}#${attempt}`] ?? 0).toFixed(6)) }) + "\n");
+    // Strict stop conditions (repeated infrastructure fault, unclassified failure, waste, LLM cap).
+    if (mode === "repro" && !stop) {
+      const rows = readFileSync(tracePath, "utf8").split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+      stop = stopCheck(procFails, costReport(rows, repro?.gpu?.budget.byAttempt ?? {}));
+    }
     if (outcome === "ok" && o.crashAfter !== undefined && ++completedHere >= o.crashAfter) process.exit(137);
   };
 
   const running = new Map<string, Promise<void>>();
   let fatal: string | undefined;
   for (;;) {
-    if (fatal) break; // nothing new starts once the provider is unusable; running nodes finish
+    if (fatal || stop) break; // nothing new starts once the provider is unusable; running nodes finish
     for (const b of blocked(state)) emit({ t: "skip", at: now(), id: b.id, reason: b.reason });
     for (const n of ready(state)) {
       if (running.size >= concurrency) break;
@@ -274,7 +284,8 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   }
   while (running.size) await Promise.race(running.values());
   if (fatal) writeFileSync(join(runDir, "stopped.json"), JSON.stringify({ reason: "provider_fatal", detail: fatal, at: now() }));
-  if (settled(state) && !state.done && !fatal) emit({ t: "done", at: now() });
+  else if (stop) writeFileSync(join(runDir, "stopped.json"), JSON.stringify({ ...stop, at: now() }));
+  if (settled(state) && !state.done && !fatal && !stop) emit({ t: "done", at: now() });
 
   const m = manifest();
   const arts = state.order.flatMap((id) => state.nodes.get(id)!.artifacts.map((a) => ({ node: id, name: a.name, sha256: a.sha256 })));

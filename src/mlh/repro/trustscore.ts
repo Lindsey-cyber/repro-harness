@@ -5,6 +5,7 @@
 // sends it back to probation. While any role is on probation, campaigns stay
 // small: the system does not scale what it has not proven.
 import type { RunEvent } from "../core/dag.ts";
+import { failureClass } from "./accounting.ts";
 
 export const ROLES = ["claims", "env", "planner", "debugger"] as const;
 export type Role = (typeof ROLES)[number];
@@ -25,7 +26,6 @@ export function wilsonLower(ok: number, n: number, z = 1.96): number {
   return (p + (z * z) / (2 * n) - z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
 }
 
-const INFRA = new Set(["sandbox_transient", "provider_transient", "provider_fatal", "precondition"]);
 
 type Ev = RunEvent & { id?: string; output?: Record<string, unknown> };
 
@@ -33,7 +33,7 @@ type Ev = RunEvent & { id?: string; output?: Record<string, unknown> };
 export function roleOutcomes(events: Ev[]): Record<Role, Outcome> {
   const ok = (id: string) => events.find((e) => e.t === "ok" && e.id === id) as (Ev & { output: Record<string, unknown> }) | undefined;
   // Infrastructure failures (provider, sandbox transport, spend limits) are evidence about the platform, not the agent.
-  const fails = (prefix: string) => (events.filter((e) => e.t === "fail" && (e.id ?? "").startsWith(prefix)) as (Ev & { category: string; message: string })[]).filter((f) => !INFRA.has(f.category));
+  const fails = (prefix: string) => (events.filter((e) => e.t === "fail" && (e.id ?? "").startsWith(prefix)) as (Ev & { category: string; message: string })[]).filter((f) => failureClass(f.category, f.id ?? "", f.message) === "agent");
   const out: Record<Role, Outcome> = { claims: null, env: null, planner: null, debugger: null };
 
   const c = ok("repro.claims");

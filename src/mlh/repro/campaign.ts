@@ -6,6 +6,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runProc, startProc } from "../io/proc.ts";
+import { costReport, renderCost, type CostReport } from "./accounting.ts";
 import { doctorFresh, renderDoctor, runDoctor } from "./doctor.ts";
 import { pipelineMetric, renderRetro, roundOf, type Round } from "./retro.ts";
 import { emptyStore, record, renderTrust, roleOutcomes, scaleGate, type TrustStore } from "./trustscore.ts";
@@ -120,14 +121,20 @@ function render(rows: Record<string, unknown>[], extra: string[] = []): string {
 // Preflight: the LLM provider's balance, all currencies summed (CNY counted as is; the
 // threshold is in the same unit). Unknown (network error, other provider) never blocks.
 // Modal spend across every run this checkout has made (each run keeps its own budget.json).
+// A run directory copied elsewhere (a run moved to another round) shares its run.json: counted once,
+// at the larger of the copies' spend (the copy that continued includes what the original spent).
 export function modalSpent(root = join(ROOT, ".mlh", "campaign")): number {
-  let total = 0;
+  const byRun = new Map<string, number>();
   if (!existsSync(root)) return 0;
   for (const label of readdirSync(root)) for (const id of statSync(join(root, label)).isDirectory() ? readdirSync(join(root, label)) : []) {
-    const f = join(root, label, id, "budget.json");
-    if (existsSync(f)) try { total += Number(JSON.parse(readFileSync(f, "utf8")).spent) || 0; } catch { /* torn file: skipped, the run's own .bak recovers it */ }
+    const dir = join(root, label, id), f = join(dir, "budget.json");
+    if (!existsSync(f)) continue;
+    let spent = 0;
+    try { spent = Number(JSON.parse(readFileSync(f, "utf8")).spent) || 0; } catch { continue; /* torn: the run's own .bak recovers it */ }
+    const key = existsSync(join(dir, "run.json")) ? readFileSync(join(dir, "run.json"), "utf8") : dir;
+    byRun.set(key, Math.max(byRun.get(key) ?? 0, spent));
   }
-  return total;
+  return [...byRun.values()].reduce((a, b) => a + b, 0);
 }
 
 export async function llmBalance(): Promise<number | undefined> {
@@ -145,6 +152,31 @@ function writeAtomic(file: string, body: string) {
   if (existsSync(file)) writeFileSync(`${file}.bak`, readFileSync(file));
   writeFileSync(`${file}.tmp`, body);
   renameSync(`${file}.tmp`, file);
+}
+
+// One run's cost by bucket. Runs from before per-attempt Modal accounting have only a total:
+// it is reported as unattributed, not guessed.
+export function costOfRun(runDir: string): CostReport {
+  const rows = existsSync(join(runDir, "trace.jsonl")) ? readFileSync(join(runDir, "trace.jsonl"), "utf8").split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } }) : [];
+  let byAttempt: Record<string, number> = {};
+  if (existsSync(join(runDir, "budget.json"))) {
+    const b = JSON.parse(readFileSync(join(runDir, "budget.json"), "utf8")) as { spent?: number; byAttempt?: Record<string, number> };
+    const attributed = Object.values(b.byAttempt ?? {}).reduce((a, x) => a + x, 0);
+    byAttempt = { ...(b.byAttempt ?? {}), ...((b.spent ?? 0) - attributed > 1e-6 ? { "(before per-attempt accounting)": (b.spent ?? 0) - attributed } : {}) };
+  }
+  const messages: Record<string, string> = {};
+  const attempts: Record<string, number> = {};
+  for (const e of events(runDir) as (Ev & { message?: string; attempt?: number })[]) {
+    if (e.t === "start" && e.id) attempts[e.id] = e.attempt ?? 1;
+    if (e.t === "fail" && e.id) messages[`${e.id}#${attempts[e.id] ?? 1}`] = e.message ?? "";
+  }
+  return costReport(rows, byAttempt, messages);
+}
+
+export function costOfRound(label: string): string {
+  const base = join(ROOT, ".mlh", "campaign", label);
+  const ids = existsSync(base) ? readdirSync(base).filter((d) => statSync(join(base, d)).isDirectory()) : [];
+  return ids.map((id) => renderCost(`${label}/${id}`, costOfRun(join(base, id)))).join("\n");
 }
 
 // Trust is derived, like the DAG state: a fold over every finished team run's journal in time
@@ -234,6 +266,15 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
         appendFileSync(log, `\n[campaign] ${String(e)}\n`);
       }
       const row = summarize(p, runDir, resumes, (Date.now() - t0) / 1000);
+      if (row.stopped && row.stopped !== "provider_fatal") {
+        // A strict stop (repeated infrastructure fault, unclassified failure, waste, LLM cap) stops the
+        // round: investigate before anything else is spent. The row is kept; stopped rows are no trust evidence.
+        stop = true;
+        rows.push(row);
+        appendFileSync(rowsFile, JSON.stringify(row) + "\n");
+        writeFileSync(join(o.out, `${o.label}.md`), render(rows, [`ROUND STOPPED at ${p.id}: ${row.stopped}`]));
+        continue;
+      }
       if (row.stopped === "provider_fatal") {
         // No final row: after the balance is restored, a relaunch resumes this paper from its journal.
         stop = true;

@@ -70,6 +70,11 @@ async function main(): Promise<void> {
       process.exitCode = d.ok ? 0 : 1;
       break;
     }
+    case "cost": {
+      const { costOfRound } = await import("./repro/campaign.ts");
+      console.log(costOfRound(positional[0]!));
+      break;
+    }
     case "campaign-retro": {
       // Idempotent: the chain calls it for every finished round, whatever code version ran that round.
       const { retroRound } = await import("./repro/campaign.ts");

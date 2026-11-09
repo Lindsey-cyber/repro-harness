@@ -2,6 +2,7 @@
 // never on this machine; this module uploads, launches and reads results through
 // the Modal SDK (modal_runner.py). A dollar budget is enforced before every
 // launch: a run whose worst case would exceed what is left is refused.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FailureCategory } from "../core/types.ts";
@@ -41,21 +42,30 @@ export interface RemoteRun {
 }
 export interface RemoteResult { exitCode: number; stdout: string; stderr: string; elapsedS: number; costUsd: number; files: Record<string, string>; category: FailureCategory | null }
 
+// Which node attempt a charge belongs to ("<node id>#<attempt>"), set by the orchestrator around
+// each attempt. AsyncLocalStorage keeps it right when several stages run at once.
+export const costScope = new AsyncLocalStorage<string>();
+export const UNSETTLED = "(reservations of a killed process)";
+
 export class Budget {
   spent = 0;
+  // Spend per node attempt, so failed attempts and retries can be priced separately.
+  byAttempt: Record<string, number> = {};
   // With a file, spending survives a crash: a resumed run continues from what it already spent.
   constructor(readonly limitUsd: number, private readonly file?: string) {
     if (file && existsSync(file)) {
       try {
-        const j = JSON.parse(readFileSync(file, "utf8")) as { spent?: number; reserved?: number };
+        const j = JSON.parse(readFileSync(file, "utf8")) as { spent?: number; reserved?: number; byAttempt?: Record<string, number> };
         // Reservations left unsettled by a killed process count as spent: those containers did run.
         this.spent = (Number(j.spent) || 0) + (Number(j.reserved) || 0);
+        this.byAttempt = { ...(j.byAttempt ?? {}) };
+        if (Number(j.reserved) > 0) this.byAttempt[UNSETTLED] = (this.byAttempt[UNSETTLED] ?? 0) + Number(j.reserved);
       } catch { /* a torn file: start from the backup below */ if (existsSync(`${file}.bak`)) this.spent = Number(JSON.parse(readFileSync(`${file}.bak`, "utf8")).spent) || 0; }
     }
   }
   private save() {
     if (!this.file) return;
-    const body = JSON.stringify({ spent: this.spent, reserved: this.reserved, limit: this.limitUsd });
+    const body = JSON.stringify({ spent: this.spent, reserved: this.reserved, limit: this.limitUsd, byAttempt: this.byAttempt });
     writeFileSync(`${this.file}.tmp`, body);
     renameSync(`${this.file}.tmp`, this.file); // atomic: a kill mid-write leaves the old or the new file
     writeFileSync(`${this.file}.bak`, body);
@@ -75,6 +85,8 @@ export class Budget {
   release(r: RemoteRun) { this.reserved = Math.max(0, this.reserved - this.worstCase(r)); this.save(); }
   charge(usd: number) {
     this.spent += usd;
+    const k = costScope.getStore() ?? "(outside any node)";
+    this.byAttempt[k] = (this.byAttempt[k] ?? 0) + usd;
     this.save();
   }
   remaining(): number { return this.limitUsd - this.spent - this.reserved; }
