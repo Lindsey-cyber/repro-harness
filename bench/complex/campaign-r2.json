@@ -1,0 +1,10 @@
+[
+ {
+  "id": "ft_transformer",
+  "arxiv": "2106.11959",
+  "repo": "https://github.com/yandex-research/rtdl-revisiting-models",
+  "commit": "e3ed46c",
+  "objective": "Reproduce the FT-Transformer results on California Housing (RMSE) and Adult (accuracy) from Table 3 with this repository's tuned configurations.",
+  "budgetUsd": 5
+ }
+]
