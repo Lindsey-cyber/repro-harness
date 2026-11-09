@@ -262,11 +262,20 @@ export function smokeCwd(c: unknown): string {
   return !r || r.startsWith("/") || r.split("/").includes("..") ? "." : r;
 }
 
+// Files the launch command names (configs, scripts) must be in the repository: the agent's own workspace
+// is not kept (SimSiam r3: a config the env agent wrote cost a 10-minute smoke run to find missing).
+export function missingLaunchFiles(repo: string, cwd: string, argv: string[]): string[] {
+  return argv.filter((a) => /^[\w./-]+\.(ya?ml|json|py|sh|cfg|ini|toml|txt)$/.test(a) && (!a.startsWith("/") || a.startsWith("/work/")))
+    .filter((a) => !existsSync(a.startsWith("/work/") ? join(repo, a.slice(6)) : join(repo, cwd, a)));
+}
+
 async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string, string>; example_command?: string[] } | undefined, pip: string[], site: string | undefined, image?: string, system: string[] = []): Promise<{ ok: boolean; why: string; command: string; tail: string }> {
   const argv = Array.isArray(launch?.example_command) ? launch!.example_command.map(String) : [];
   if (!argv.length) return { ok: false, why: "the environment agent gave no launch command", command: "", tail: "" };
   const env = Object.fromEntries(Object.entries(launch?.env ?? {}).filter(([k, v]) => /^[A-Z_][A-Z0-9_]*$/.test(k) && typeof v === "string" && !/^(PATH|HOME|LD_|PYTHONHOME)/.test(k))) as Record<string, string>;
   const cwd = smokeCwd(launch?.cwd);
+  const missing = missingLaunchFiles(need(ctx).versionDir(0), cwd, argv);
+  if (missing.length) return { ok: false, why: `the launch command names ${missing.join(", ")}, which the repository does not have (files you create in your workspace are not kept; use the repository's own files or command-line options)`, command: argv.join(" "), tail: "" };
   const script = ["bash", "-c", `cd "$1" && shift && timeout ${SMOKE_S} "$@"; echo MLH_SMOKE_EXIT=$?`, "bash", cwd, ...argv];
   const g = need(ctx).gpu;
   let out: string, err: string;

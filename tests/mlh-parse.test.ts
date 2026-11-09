@@ -154,6 +154,21 @@ describe("declared reporting rule (select over epochs, aggregate over seeds)", a
   });
 });
 
+describe("launch command files must exist in the repository (SimSiam r3)", async () => {
+  const { missingLaunchFiles } = await import("../src/mlh/repro/skills.ts");
+  const { mkdtempSync, mkdirSync: md, writeFileSync: wf } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  it("names a config the agent wrote in its workspace; accepts repository files, /work paths and non-files", () => {
+    const repo = mkdtempSync(join(tmpdir(), "mlh-lf-"));
+    md(join(repo, "configs")); wf(join(repo, "configs", "simsiam_cifar_quick.yaml"), ""); wf(join(repo, "main.py"), "");
+    const argv = (c: string) => ["python", "main.py", "--data_dir", "/cache/data/cifar10", "--log_dir", "/tmp/l", "-c", c, "--hide_progress"];
+    expect(missingLaunchFiles(repo, ".", argv("configs/simsiam_cifar_smoke.yaml"))).toEqual(["configs/simsiam_cifar_smoke.yaml"]);
+    expect(missingLaunchFiles(repo, ".", argv("configs/simsiam_cifar_quick.yaml"))).toEqual([]);
+    expect(missingLaunchFiles(repo, ".", ["python", "/work/main.py", "--out", "/tmp/x.json"])).toEqual([]);
+  });
+});
+
 describe("plan flags that differ from the repository's launch script (LoRA r3)", async () => {
   const { recipeDeviations, recipeErrors } = await import("../src/mlh/repro/skills.ts");
   const scripts = ["roberta_base_rte.sh", "roberta_base_mrpc.sh"].map((n) => ({ name: n, text: readFileSync(`tests/fixtures/lora-scripts/${n}`, "utf8") }));
