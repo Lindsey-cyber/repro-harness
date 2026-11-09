@@ -1,0 +1,1 @@
+{"label":"r3","at":"2026-11-09T18:54:23.296Z","success":1,"n":1,"medianMin":13,"gpuUsd":8.42,"llmUsd":0.14,"blockedBy":["claims","env","planner","debugger"],"topFailure":"provider_transient"}
