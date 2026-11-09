@@ -114,7 +114,13 @@ def op_run(req):
                 files[rel] = sb.filesystem.read_text(f"/work/{rel}")[-200000:]
             except Exception:
                 pass
-        return {"exit_code": code, "stdout": out[-100000:], "stderr": err[-50000:], "elapsed_s": time.time() - t0, "files": files}
+        res = {"exit_code": code, "stdout": out[-100000:], "stderr": err[-50000:], "elapsed_s": time.time() - CREATED_AT, "files": files}
+        # Long output (per-epoch training logs): the whole of it, compressed, so metrics can be read from
+        # every epoch (LoRA r3: only the last 42 of 80 RTE epochs survived the 100 kB tail).
+        if len(out) > 100000:
+            import base64, gzip
+            res["stdout_gz"] = base64.b64encode(gzip.compress(out[-50_000_000:].encode())).decode()
+        return res
     finally:
         # Volume changes become visible to other containers only once termination has committed them:
         # wait for it, or the next stage can start on a stale view (GraphSAINT r1, missing build outputs).

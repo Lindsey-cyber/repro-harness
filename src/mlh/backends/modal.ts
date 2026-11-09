@@ -3,6 +3,7 @@
 // the Modal SDK (modal_runner.py). A dollar budget is enforced before every
 // launch: a run whose worst case would exceed what is left is refused.
 import { AsyncLocalStorage } from "node:async_hooks";
+import { gunzipSync } from "node:zlib";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FailureCategory } from "../core/types.ts";
@@ -203,5 +204,7 @@ async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteR
   budget.charge(cost);
   const code = Number(r.exit_code), stderr = String(r.stderr);
   const category: FailureCategory | null = code === 0 ? null : code === 124 || code === -1 ? "timeout" : /CUDA out of memory|OutOfMemoryError/.test(stderr) ? "resource_limit" : "experiment_error";
-  return { exitCode: code, stdout: String(r.stdout), stderr, elapsedS: elapsed, costUsd: cost, files: (r.files ?? {}) as Record<string, string>, category };
+  // The full output when the runner sent it compressed (long training logs); else its tail.
+  const stdout = typeof r.stdout_gz === "string" ? gunzipSync(Buffer.from(r.stdout_gz, "base64")).toString("utf8") : String(r.stdout);
+  return { exitCode: code, stdout, stderr, elapsedS: elapsed, costUsd: cost, files: (r.files ?? {}) as Record<string, string>, category };
 }
