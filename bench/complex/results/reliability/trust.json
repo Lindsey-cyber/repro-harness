@@ -1,13 +1,19 @@
 {
  "claims": {
   "level": "probation",
-  "n": 1,
-  "ok": 1,
-  "lower": 0.20654329147389294,
+  "n": 2,
+  "ok": 2,
+  "lower": 0.3423719528896193,
   "history": [
    {
     "at": "2026-11-09T04:22:30.097Z",
     "paper": "p5detr-clean1/detr",
+    "ok": true,
+    "why": "every extracted number is in the PDF"
+   },
+   {
+    "at": "2026-11-09T06:23:29.041Z",
+    "paper": "r1/simcse",
     "ok": true,
     "why": "every extracted number is in the PDF"
    }
@@ -15,27 +21,39 @@
  },
  "env": {
   "level": "probation",
-  "n": 1,
+  "n": 2,
   "ok": 1,
-  "lower": 0.20654329147389294,
+  "lower": 0.09452865480086611,
   "history": [
    {
     "at": "2026-11-09T04:22:30.097Z",
     "paper": "p5detr-clean1/detr",
     "ok": true,
     "why": "smoke test passed on the agent's own report"
+   },
+   {
+    "at": "2026-11-09T06:23:29.041Z",
+    "paper": "r1/simcse",
+    "ok": false,
+    "why": "smoke passed only after a repair round"
    }
   ]
  },
  "planner": {
   "level": "probation",
-  "n": 1,
-  "ok": 1,
-  "lower": 0.20654329147389294,
+  "n": 2,
+  "ok": 2,
+  "lower": 0.3423719528896193,
   "history": [
    {
     "at": "2026-11-09T04:22:30.097Z",
     "paper": "p5detr-clean1/detr",
+    "ok": true,
+    "why": "plan accepted"
+   },
+   {
+    "at": "2026-11-09T06:23:29.041Z",
+    "paper": "r1/simcse",
     "ok": true,
     "why": "plan accepted"
    }

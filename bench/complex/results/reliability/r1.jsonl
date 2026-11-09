@@ -1,0 +1,1 @@
+{"paper":"simcse","arxiv":"2104.08821","claims":[{"id":"unsup_simcse_bertbase_avg_sts","paper":0.7625,"status":"reproduced","mean":0.7625000000000001}],"fidelity":"eval_only","image":"py3.7-torch1.10-cu111","smoke":true,"gpuUsd":0.271,"llmTokens":1743539,"llmUsd":0.069,"wallMin":33,"resumes":0,"failures":{},"failedNodes":[],"stopped":null,"done":true}

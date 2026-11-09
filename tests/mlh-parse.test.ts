@@ -34,3 +34,14 @@ describe("metric extraction", () => {
     expect((await disambiguate(none, claim, PARSE, metricSeries(metricMatches(PARSE, COCO)))).index).toBeUndefined();
   });
 });
+
+describe("a parse pattern may not encode expected results", async () => {
+  const { validateGpuPlan } = await import("../src/mlh/repro/gpu.ts");
+  const { gpuPrice } = await import("../src/mlh/backends/modal.ts");
+  const plan = (parse: string) => ({ fidelity: "eval_only", stages: [{ id: "s", argv: ["python", "e.py"], timeoutS: 300 }], claims: [{ claim: "c", stage: "s", parse }] });
+  const v = (parse: string) => validateGpuPlan([{ id: "c", metric: "x", value: 0.7625 }] as never, plan(parse), { budgetUsd: 5, price: gpuPrice }).errors.join();
+  it("rejects SimCSE r1's pattern (seven expected scores), keeps DETR's label pattern", () => {
+    expect(v("\\|\\s*68\\.40\\s*\\|\\s*82\\.41\\s*\\|\\s*74\\.38\\s*\\|\\s*80\\.91\\s*\\|\\s*78\\.56\\s*\\|\\s*76\\.85\\s*\\|\\s*72\\.23\\s*\\|\\s*([0-9]+\\.[0-9]+)\\s*\\|")).toMatch(/by its label, not by expected numbers/);
+    expect(v(PARSE)).toBe("");
+  });
+});

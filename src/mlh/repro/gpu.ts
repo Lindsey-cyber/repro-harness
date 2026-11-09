@@ -174,6 +174,9 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
     let groups = -1;
     try { groups = new RegExp(`${String(m.parse)}|`).exec("")!.length - 1; } catch { /* invalid */ }
     if (groups !== 1) { errors.push(`${c.id}: parse must be a regex with exactly one capture group`); continue; }
+    // The pattern must find the metric by its label, not by expected numbers (SimCSE r1: the planner
+    // wrote the seven per-task scores into the pattern; it only matched because they repeated exactly).
+    if ((String(m.parse).match(/\d+\\?\.\d+/g) ?? []).length > 2) { errors.push(`${c.id}: parse must locate the metric by its label, not by expected numbers (it contains more than two decimal literals)`); continue; }
     cl.push({ claim: c.id, stage: String(m.stage).replace(/[^\w-]/g, "_"), parse: String(m.parse), ...(typeof m.scale === "number" && m.scale > 0 ? { scale: m.scale } : {}) });
   }
   const seeds = [...new Set((Array.isArray(r.seeds) ? r.seeds : [0]).filter((x) => Number.isInteger(x)))].slice(0, 5);
