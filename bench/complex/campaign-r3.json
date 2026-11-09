@@ -1,0 +1,18 @@
+[
+ {
+  "id": "lora",
+  "arxiv": "2106.09685",
+  "repo": "https://github.com/microsoft/LoRA",
+  "commit": "c4593f0",
+  "objective": "Reproduce the GLUE dev results of LoRA on RoBERTa-base for MRPC and RTE (Table 2) by fine-tuning with this repository's NLU example.",
+  "budgetUsd": 5
+ },
+ {
+  "id": "simsiam",
+  "arxiv": "2011.10566",
+  "repo": "https://github.com/PatrickHua/SimSiam",
+  "commit": "75a7c51",
+  "objective": "Check the stop-gradient ablation of SimSiam on CIFAR-10 with this repository: with stop-gradient, kNN accuracy is high; without it, the representation collapses (accuracy near chance). A scaled-down number of epochs is acceptable.",
+  "budgetUsd": 5
+ }
+]
