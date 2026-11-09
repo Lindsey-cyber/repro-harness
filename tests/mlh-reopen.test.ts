@@ -28,3 +28,17 @@ describe("reopen after platform failures", () => {
     expect(s.nodes.get("x")!.status).toBe("failed");
   });
 });
+
+describe("operator reopen after a harness fix", async () => {
+  const { reopenByOperator } = await import("../src/mlh/core/dag.ts");
+  it("reopens the named failed stages, skips their debuggers, brings back their comparisons, leaves the rest", () => {
+    const s = replay(events, 3);
+    reopenPlatform(s, "t"); // start from lora's state after the platform reopen
+    // fail the reopened rte stage by name, as a harness bug would
+    for (let i = 0; i < 3; i++) { apply(s, { t: "start", at: "t", id: "repro.stage:rte_lora:v0", attempt: i + 1 }); apply(s, { t: "fail", at: "t", id: "repro.stage:rte_lora:v0", category: "experiment_error", message: "config {seed}.toml not found" }); }
+    const ev = reopenByOperator(s, "repro.stage:rte_lora", "{seed} substitution fixed", "t");
+    expect(s.nodes.get("repro.stage:rte_lora:v0")!.status).toBe("pending");
+    expect(ev.some((e) => e.t === "reopen" && "reason" in e && /operator: \{seed\} substitution fixed/.test(e.reason))).toBe(true);
+    expect(s.nodes.get("repro.stage:mrpc_lora:v0")!.status).toBe("pending"); // untouched by the operator (pending from before)
+  });
+});

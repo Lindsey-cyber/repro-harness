@@ -198,6 +198,25 @@ export function reopenPlatform(s: RunState, at: string): RunEvent[] {
   return out;
 }
 
+// An operator's journaled correction after a harness bug was fixed: failed nodes whose id starts with
+// `prefix` get a fresh attempt, debuggers called for them are skipped (the failure was the harness's),
+// and nodes skipped only because of them come back. Like an approval, it is recorded with its reason.
+export function reopenByOperator(s: RunState, prefix: string, reason: string, at: string): RunEvent[] {
+  const out: RunEvent[] = [];
+  const push = (e: RunEvent) => { apply(s, e); out.push(e); };
+  const hit = s.order.filter((id) => id.startsWith(prefix) && s.nodes.get(id)!.status === "failed");
+  for (const id of hit) push({ t: "reopen", at, id, reason: `operator: ${reason}` });
+  for (const id of s.order) {
+    const ns = s.nodes.get(id)!;
+    if (ns.node.skill === "repro.debug" && hit.includes(String(ns.node.params.failedRun)) && ns.status !== "succeeded" && ns.status !== "skipped") push({ t: "skip", at, id, reason: `operator: the failure was the harness's (${reason})` });
+  }
+  for (const id of s.order) {
+    const ns = s.nodes.get(id)!, m = ns.status === "skipped" ? /^dependency (\S+) (failed|skipped)$/.exec(ns.reason ?? "") : null;
+    if (m && s.nodes.get(m[1]!)?.status === "pending") push({ t: "reopen", at, id, reason: `dependency ${m[1]} reopened` });
+  }
+  return out;
+}
+
 export function blocked(s: RunState): { id: string; reason: string }[] {
   const out: { id: string; reason: string }[] = [];
   for (const id of s.order) {

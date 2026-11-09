@@ -75,6 +75,17 @@ async function main(): Promise<void> {
       console.log(costOfRound(positional[0]!));
       break;
     }
+    case "reopen": {
+      // mlh reopen <runDir> <id-prefix> <reason>: journaled operator correction after a harness fix.
+      const { replay, reopenByOperator } = await import("./core/dag.ts");
+      const { readFileSync: rf, appendFileSync: af } = await import("node:fs");
+      const j = `${positional[0]}/journal.jsonl`;
+      const st = replay(rf(j, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)), 3);
+      const ev = reopenByOperator(st, positional[1]!, positional.slice(2).join(" ") || "harness fix", new Date().toISOString());
+      for (const e of ev) af(j, JSON.stringify(e) + "\n");
+      console.log(ev.map((e) => `${e.t} ${"id" in e ? e.id : ""}`).join("\n") || "nothing to reopen");
+      break;
+    }
     case "campaign-retro": {
       // Idempotent: the chain calls it for every finished round, whatever code version ran that round.
       const { retroRound } = await import("./repro/campaign.ts");
