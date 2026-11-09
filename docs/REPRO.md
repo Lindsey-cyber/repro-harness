@@ -144,3 +144,44 @@ Caveats:
 - All of v2 → v3 and the fixes above came from failures on this same benchmark, so v3 is not a blind number.
 - A fresh held-out set of real repositories is needed before claiming generalization.
 - Ten tasks, mostly graph learning on Cora-family data, is a narrow domain.
+
+## Unattended campaigns on complex papers (`src/mlh/repro/{campaign,trustscore,retro,doctor}.ts`)
+
+The loop that runs without a person, and what keeps it honest:
+
+1. **Prove the platform first** (`mlh doctor`, ~2 min, cents). Every base image is asked what
+   Python/torch it really contains (labels must match), Modal must start a container, the LLM
+   balance must be above `MLH_MIN_LLM_BALANCE`. A round does not start without a passing probe
+   from the last 24 h. Its first run found 3 of 6 image labels wrong.
+2. **Per-role trust gates scale.** Claims, env, planner and debugger each earn trust from
+   harness facts in the journal (number in the PDF; smoke test passed without repair; plan
+   accepted by the validator; an accepted change made the failing step succeed). Platform
+   failures are never counted. Promotion: 95 % Wilson lower bound >= 0.6 over >= 5 runs (six
+   clean runs in practice); one failure while trusted demotes and resets the count. While any
+   role is on probation a round runs at most 3 papers, one at a time, least-evidence first. The
+   debugger blocks only once it has been needed. Trust is derived (a fold over finished runs'
+   journals), so crashes, concurrent rounds and rule changes cannot corrupt it.
+3. **Each round reviews itself.** At the end of a round the harness appends to
+   `bench/complex/results/decisions.md` and `rounds.jsonl`: pipeline success (every claim
+   definitive, run not stopped) vs the previous round, median minutes per paper, the most
+   frequent failure and who must act on it, and the stop predicate (all roles trusted,
+   >= 80 % success two rounds running, median <= 45 min).
+4. **Rounds chain** (`scripts/mlh-chain.sh`): the next round starts when the previous one wrote
+   its done marker or was seen running and then gone; a `stopped` round (balance, limits) ends
+   the chain.
+5. **Recovery.** Stalled children are killed and resumed from the journal; on resume, nodes that
+   failed on the platform (outage, capacity, a spend limit since raised) get a fresh attempt.
+6. **Time.** Agents, not GPUs, took the time in c1 (plan 211 min, env 160, stages 9). Roles now
+   have a per-command cap and a wall-clock budget; every step logs LLM and tool time.
+7. **Cost.** Every Modal container is billed for CPU/memory as well as GPU; a ledger sums all runs
+   against `MLH_MODAL_LIMIT_USD`. The ledger covers DeepSeek (agents) and Modal; the supervising
+   coordinator session's own model use is not on it.
+
+Offline regression suites (no network, $0): recorded planner drafts replayed through the
+validator (`tests/mlh-replay`), every recorded Modal error with its category
+(`tests/mlh-errors`), resume of lora's real journal (`tests/mlh-reopen`), trust/gate/retro
+rules (`tests/mlh-trust`, `tests/mlh-retro`), doctor checks, agent time limits.
+
+Status (2026-11-09): c1 finished 1 of 4 papers definitively (DETR, reproduced); the other
+failures were harness/platform faults, each now covered by a test. Single-agent baseline on
+complex papers, recovery and variance repeats: not yet run.
