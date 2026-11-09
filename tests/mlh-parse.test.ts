@@ -45,3 +45,19 @@ describe("a parse pattern may not encode expected results", async () => {
     expect(v(PARSE)).toBe("");
   });
 });
+
+describe("plan rules from FT-Transformer r2", async () => {
+  const { validateGpuPlan } = await import("../src/mlh/repro/gpu.ts");
+  const { gpuPrice } = await import("../src/mlh/backends/modal.ts");
+  const f = JSON.parse(readFileSync("tests/fixtures/ft-transformer-r2-plan.json", "utf8"));
+  const v = (plan: unknown) => validateGpuPlan(f.claims, plan, { budgetUsd: 5, price: gpuPrice }).errors.join(" | ");
+  it("the recorded plan is rejected: 28 of 30 stages serve no claim, and stages read the whole /cache", () => {
+    const e = v(f.plan);
+    expect(e).toMatch(/and 20 more serve no claim/);
+    expect(e).toMatch(/may not use the whole \/cache/);
+  });
+  it("only the claim stages, pointed at a fetched directory: accepted", () => {
+    const keep = f.plan.stages.filter((s: { id: string }) => ["ca_seed3", "adult_seed5"].includes(s.id)).map((s: { env: Record<string, string> }) => ({ ...s, env: { ...s.env, PROJECT_DIR: "/cache/data/rtdl" } }));
+    expect(v({ ...f.plan, stages: keep, fetch: [{ url: f.plan.fetch[0].url, to: "/cache/data/rtdl", unpack: "tar" }] })).toBe("");
+  });
+});

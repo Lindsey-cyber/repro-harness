@@ -150,6 +150,9 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   const checks = ((r as { checks?: { path?: string; minFiles?: number }[] }).checks ?? []).filter((c) => typeof c.path === "string" && c.path.startsWith("/cache/") && Number(c.minFiles) > 0).map((c) => ({ path: c.path!, minFiles: Number(c.minFiles) }));
   // Every /cache path a stage uses must come from a fetch item: data whose origin is unknown cannot be reproduced.
   for (const st of stages) {
+    // The whole volume is not an input: it would hand a stage whatever any earlier command left there
+    // (FT-Transformer r2: PROJECT_DIR=/cache read data the env agent downloaded, unrecorded).
+    if ([...st.argv, ...Object.values(st.env ?? {}), st.cwd ?? ""].some((a) => /^\/cache\/?$|^\/cache\/data\/?$/.test(a))) errors.push(`${st.id}: a stage may not use the whole /cache or /cache/data; point it at the directory a fetch item fills (e.g. /cache/data/<name>, with unpack)`);
     for (const ref of [...st.argv, ...Object.values(st.env ?? {})].flatMap((a) => a.match(/\/cache\/[\w./-]+/g) ?? [])) {
       // No traversal: "/cache/runs/../data/x" or "/cache/data/a/../../etc" would escape every rule below.
       if (ref.split("/").includes("..")) { errors.push(`${st.id}: ${ref}: ".." is not allowed in /cache paths`); continue; }
@@ -187,6 +190,12 @@ export function validateGpuPlan(claims: Claim[], raw: unknown, o: { budgetUsd: n
   // Worst case: every stage instance runs to its timeout, plus container start-up.
   const worstCaseUsd = stages.reduce((a, s) => a + (s.gpu ? (o.price(s.gpu) * (s.timeoutS + 300)) / 3600 : ((o.cpu ?? 0.1) * (s.timeoutS + 300)) / 3600) * (s.perSeed ? seeds.length : 1), 0);
   if (worstCaseUsd > o.budgetUsd) errors.push(`worst-case cost $${worstCaseUsd.toFixed(2)} exceeds the budget $${o.budgetUsd.toFixed(2)}: lower fidelity, shorter timeouts, fewer seeds or a cheaper GPU`);
+  // Every stage must serve a claim, directly or as something a claim's stage needs (FT-Transformer r2:
+  // 30 stages planned, 2 read by claims, ~2.5 h of GPU for nothing).
+  const used = new Set(cl.map((c) => c.stage));
+  for (let grew = true; grew;) { grew = false; for (const st of stages) if (used.has(st.id)) for (const d of st.needs) if (!used.has(d)) { used.add(d); grew = true; } }
+  const idle = stages.filter((st) => !used.has(st.id)).map((st) => st.id);
+  if (idle.length) errors.push(`stages ${idle.slice(0, 8).join(", ")}${idle.length > 8 ? ` and ${idle.length - 8} more` : ""} serve no claim; drop them (a claim reads one stage, or use perSeed with seeds for several runs)`);
   if (errors.length || !fidelity) return { errors };
   return { plan: { fidelity, fidelityNote: String(r.fidelityNote ?? ""), fetch, checks, unknownHosts, stages, claims: cl, seeds, ...(typeof r.seedArg === "string" && /^--?[\w-]+$/.test(r.seedArg) ? { seedArg: r.seedArg } : {}), ...(typeof r.seedEnv === "string" && /^[A-Z_][A-Z0-9_]*$/.test(r.seedEnv) ? { seedEnv: r.seedEnv } : {}), worstCaseUsd }, errors: [] };
 }

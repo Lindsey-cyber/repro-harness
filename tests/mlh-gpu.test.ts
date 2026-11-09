@@ -48,7 +48,7 @@ describe("GPU plans", () => {
     const plan = { fidelity: "full", stages: [{ id: "m", argv: ["python", "run.py"], gpu: "T4", timeoutS: 600 }, { id: "r", argv: ["python", "run.py"], gpu: "T4", timeoutS: 600 }],
       claims: [{ claim: "RoBERTa-base LoRA MRPC dev accuracy 89.7 +/- 0.7", stage: "m", parse: "acc = ([0-9.]+)" }, { claim: "rte accuracy", stage: "r", parse: "acc = ([0-9.]+)" }] };
     const r = validateGpuPlan(two, plan, { budgetUsd: 5, price: gpuPrice });
-    expect(r.errors).toEqual(['no stage measures claim rte (set "claim" to exactly one of: "mrpc", "rte")']);
+    expect(r.errors).toContain('no stage measures claim rte (set "claim" to exactly one of: "mrpc", "rte")'); // stage r then also serves no claim
     const ok = validateGpuPlan(two, { ...plan, claims: [plan.claims[0], { ...plan.claims[1], claim: "rte" }] }, { budgetUsd: 5, price: gpuPrice });
     expect(ok.plan!.claims.map((c) => c.claim)).toEqual(["mrpc", "rte"]);
   });

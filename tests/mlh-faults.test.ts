@@ -268,16 +268,19 @@ describe("P1: a one-stage command change re-runs only that stage", () => {
     const plan = structuredClone(s.plan[0]!.args) as { stages: Record<string, unknown>[] };
     plan.stages = [
       { id: "prep", argv: ["python3", "train.py", "--steps", "1"], cwd: "/work", timeoutS: 300 },
-      { id: "other", argv: ["python3", "train.py", "--steps", "50"], cwd: "/work", timeoutS: 300 },
+      { id: "other", argv: ["python3", "train.py", "--steps", "100", "--seed", "1"], cwd: "/work", timeoutS: 300 },
       { id: "train", argv: ["python3", "train.py", "--steps", "100"], cwd: "/work", timeoutS: 300, gpu: "T4", needs: ["prep"] },
     ];
     s.plan = [{ name: "report", args: plan }];
-    (s.plan[0]!.args as { claims: { stage: string }[] }).claims[0]!.stage = "train";
+    const pc = (s.plan[0]!.args as { claims: { claim: string; stage: string; parse: string }[] }).claims;
+    pc[0]!.stage = "train";
+    pc.push({ claim: "canary_acc_b", stage: "other", parse: "accuracy: ([0-9.]+)" }); // every stage serves a claim
+    (s.claims as { claims: unknown[] }).claims.push({ id: "canary_acc_b", metric: "accuracy", value: 0.9, dataset: "synthetic" });
     s.debug = [{ name: "report", args: { causes: [{ category: "run.resource_limit", evidence: "transient: the planned command succeeds when re-run" }], patch_intent: "re-run unchanged (transient kill)", run_argv: ["python3", "train.py", "--steps", "100"], expected_effect: "the stage succeeds" } }];
     await run(ws, s);
     const calls = readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => (JSON.parse(l).cmd as string[]).join(" "));
-    const prepRuns = calls.filter((c) => c === "python3 train.py --steps 1").length, otherRuns = calls.filter((c) => c === "python3 train.py --steps 50").length;
-    expect(claims(ws.runDir)).toEqual(CLEAN);
+    const prepRuns = calls.filter((c) => c === "python3 train.py --steps 1").length, otherRuns = calls.filter((c) => c === "python3 train.py --steps 100 --seed 1").length;
+    expect(claims(ws.runDir)).toEqual([...CLEAN, ["canary_acc_b", "reproduced", 0.9]]);
     expect(journal(ws.runDir).some((e) => e.t === "ok" && String(e.id).startsWith("repro.patch") && e.output.accepted)).toBe(true);
     expect(otherRuns).toBe(1); // an independent stage is not re-run
     expect(prepRuns).toBe(2); // what the failed stage needs is re-run with it (its outputs are tagged per run)
