@@ -106,3 +106,15 @@ describe("memGB and links in a stage", async () => {
     expect(v({ memGB: 1000 }).errors.join()).toMatch(/memGB/);
   });
 });
+
+describe("smoke test working directory", async () => {
+  const { smokeCwd } = await import("../src/mlh/repro/skills.ts");
+  it("maps container paths under /work to repository paths (LoRA r3), refuses anything outside", () => {
+    expect(smokeCwd("/work/examples/NLU")).toBe("examples/NLU");
+    expect(smokeCwd("examples/NLU/")).toBe("examples/NLU");
+    expect(smokeCwd("/work")).toBe(".");
+    expect(smokeCwd("/etc")).toBe(".");
+    expect(smokeCwd("../x")).toBe(".");
+    expect(smokeCwd(undefined)).toBe(".");
+  });
+});

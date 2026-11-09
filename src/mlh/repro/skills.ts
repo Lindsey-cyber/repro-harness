@@ -186,11 +186,20 @@ export function smokeVerdict(exit: number | null, output: string): { ok: boolean
   return { ok: false, why: `the command exited with status ${exit}` };
 }
 
+// Where the smoke test runs the launch command, relative to the repository root. "/work/x" is the
+// container path of "x" (LoRA r3: "/work/examples/NLU" was silently dropped, so the command ran from
+// the root and failed). Anything outside the repository falls back to the root. Pure.
+export function smokeCwd(c: unknown): string {
+  if (typeof c !== "string") return ".";
+  const r = c.replace(/\/+$/, "").replace(/^\/work(\/|$)/, "");
+  return !r || r.startsWith("/") || r.split("/").includes("..") ? "." : r;
+}
+
 async function smoke(ctx: SkillCtx, launch: { cwd?: string; env?: Record<string, string>; example_command?: string[] } | undefined, pip: string[], site: string | undefined, image?: string, system: string[] = []): Promise<{ ok: boolean; why: string; command: string; tail: string }> {
   const argv = Array.isArray(launch?.example_command) ? launch!.example_command.map(String) : [];
   if (!argv.length) return { ok: false, why: "the environment agent gave no launch command", command: "", tail: "" };
   const env = Object.fromEntries(Object.entries(launch?.env ?? {}).filter(([k, v]) => /^[A-Z_][A-Z0-9_]*$/.test(k) && typeof v === "string" && !/^(PATH|HOME|LD_|PYTHONHOME)/.test(k))) as Record<string, string>;
-  const cwd = typeof launch?.cwd === "string" && !launch.cwd.startsWith("/") && !launch.cwd.includes("..") ? launch.cwd : ".";
+  const cwd = smokeCwd(launch?.cwd);
   const script = ["bash", "-c", `cd "$1" && shift && timeout ${SMOKE_S} "$@"; echo MLH_SMOKE_EXIT=$?`, "bash", cwd, ...argv];
   const g = need(ctx).gpu;
   let out: string, err: string;
