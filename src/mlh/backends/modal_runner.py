@@ -72,6 +72,8 @@ def op_run(req):
                   block_network=not req.get("network", False))
     if req.get("gpu"):
         kwargs["gpu"] = req["gpu"]
+    if req.get("cpus"):
+        kwargs["cpu"] = float(req["cpus"])  # CPU cores for data loading (SimSiam r3: 4 workers on the default share starved the GPU)
     if req.get("memory_mb"):
         kwargs["memory"] = int(req["memory_mb"])  # host RAM the plan asked for (GraphSAINT PPI-edge was OOM-killed)
     if req.get("network") and req.get("domains"):

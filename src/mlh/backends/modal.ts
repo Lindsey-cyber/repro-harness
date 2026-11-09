@@ -19,7 +19,9 @@ const PRICE: Record<string, number> = { T4: 0.59, L4: 0.8, A10G: 1.1, "A100-40GB
 export const cpuPrice = () => Number(process.env.MLH_CPU_PRICE ?? 0.13);
 // Requested host memory beyond the default is billed per GiB-hour (Modal list ~$0.008; MLH_MEM_PRICE).
 export const memPrice = () => Number(process.env.MLH_MEM_PRICE ?? 0.008);
-export const containerCost = (gpu: string | undefined, seconds: number, memoryMb = 0) => ((cpuPrice() + (gpu ? gpuPrice(gpu) : 0) + (memoryMb / 1024) * memPrice()) * seconds) / 3600;
+// Requested CPU cores are priced per core-hour on top of the base share.
+export const corePrice = () => Number(process.env.MLH_CORE_PRICE ?? 0.05);
+export const containerCost = (gpu: string | undefined, seconds: number, memoryMb = 0, cpus = 0) => ((cpuPrice() + (gpu ? gpuPrice(gpu) : 0) + (memoryMb / 1024) * memPrice() + cpus * corePrice()) * seconds) / 3600;
 // Every Modal error we have seen, one place, tested against the recorded corpus
 // (tests/fixtures/modal-errors.json). Order matters: capacity before the generic ResourceExhausted.
 export function classifyModalError(head: string): FailureCategory {
@@ -50,6 +52,7 @@ export interface RemoteRun {
   env?: Record<string, string>; setup?: string; outputs?: string[]; image?: string;
   system?: string[]; // image build commands the environment declared (toolchains, system packages)
   memoryMb?: number; // host RAM for the container
+  cpus?: number; // CPU cores for the container
   links?: { path: string; to: string }[]; // repo-relative symlinks into /cache/data, made before the command
   pip?: string[]; // installed into the image (cached by Modal), not at run time
   domains?: string[]; // with network: only these outbound domains (wildcards allowed)
@@ -88,7 +91,7 @@ export class Budget {
     writeFileSync(`${this.file}.bak`, body);
   }
   // Container start-up and upload add a few minutes on top of the run's own timeout.
-  worstCase(r: RemoteRun): number { return containerCost(r.gpu, r.timeoutS + 300, r.memoryMb); }
+  worstCase(r: RemoteRun): number { return containerCost(r.gpu, r.timeoutS + 300, r.memoryMb, r.cpus); }
   // Concurrent runs: each admitted run reserves its worst case until it settles, so parallel stages
   // cannot together overshoot the limit.
   reserved = 0;
@@ -162,7 +165,7 @@ export async function gatewayRun(run: RemoteRun, budget: Budget, onStarted?: (id
     const r = await gw(`/result?id=${encodeURIComponent(id)}`);
     if (r.ok && r.done) {
       if (r.error) return { exitCode: -1, stdout: "", stderr: String(r.error), elapsedS: 0, costUsd: 0, files: {}, category: /Timeout/i.test(String(r.error)) ? "timeout" : "sandbox_transient" };
-      const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed, run.memoryMb);
+      const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed, run.memoryMb, run.cpus);
       budget.charge(cost);
       const code = Number(r.exit_code), stderr = String(r.stderr);
       const category = classifyExit(code, stderr);
@@ -191,16 +194,16 @@ export async function modalRun(run: RemoteRun, budget: Budget): Promise<RemoteRe
 
 async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteResult> {
   // An image with new pip packages takes a few minutes to build the first time.
-  const r = await call({ op: "run", cache_volume: budget.volume, system: run.system ?? [], ...(run.memoryMb ? { memory_mb: run.memoryMb } : {}), links: run.links ?? [], repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [], domains: run.domains ?? [] }, (run.timeoutS + 2400) * 1000);
+  const r = await call({ op: "run", cache_volume: budget.volume, system: run.system ?? [], ...(run.memoryMb ? { memory_mb: run.memoryMb } : {}), ...(run.cpus ? { cpus: run.cpus } : {}), links: run.links ?? [], repo: run.repo, cmd: run.cmd, gpu: run.gpu, timeout_s: run.timeoutS, network: run.network ?? false, env: run.env ?? {}, outputs: run.outputs ?? [], image: run.image, pip: run.pip ?? [], restore: run.restore ?? [], persist: run.persist ?? [], domains: run.domains ?? [] }, (run.timeoutS + 2400) * 1000);
   if (!r.ok) {
     const e = String(r.error);
     const head = e.split("\n")[0]!; // classify the exception, not a build log that mentions "tokenizers"
     // What ran before the failure is charged.
     const ranS = Number(r.elapsed_s) || 0;
-    if (ranS) budget.charge(containerCost(run.gpu, ranS, run.memoryMb));
-    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: containerCost(run.gpu, ranS, run.memoryMb), files: {}, category: classifyModalError(head) };
+    if (ranS) budget.charge(containerCost(run.gpu, ranS, run.memoryMb, run.cpus));
+    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: containerCost(run.gpu, ranS, run.memoryMb, run.cpus), files: {}, category: classifyModalError(head) };
   }
-  const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed, run.memoryMb);
+  const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed, run.memoryMb, run.cpus);
   budget.charge(cost);
   const code = Number(r.exit_code), stderr = String(r.stderr);
   const category: FailureCategory | null = code === 0 ? null : code === 124 || code === -1 ? "timeout" : /CUDA out of memory|OutOfMemoryError/.test(stderr) ? "resource_limit" : "experiment_error";

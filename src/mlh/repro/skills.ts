@@ -148,8 +148,8 @@ export async function probeUrls(urls: string[]): Promise<string[]> {
 const remoteFor = (ctx: SkillCtx, pip: string[], image?: string) => {
   const g = need(ctx).gpu;
   if (!g) return {};
-  return { remote: { pip, system: systemOf(ctx.state), gpus: GPUS, images: IMAGES, image: image ?? DEFAULT_IMAGE_KEY, run: async (ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[]; image?: string; system?: string[] }) => {
-    const r = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: o.timeoutS, network: true, pip: o.pip, system: o.system ?? [], image: IMAGES[o.image ?? DEFAULT_IMAGE_KEY]!, ...(o.gpu ? { gpu: o.gpu } : {}) }, g.budget);
+  return { remote: { pip, system: systemOf(ctx.state), gpus: GPUS, images: IMAGES, image: image ?? DEFAULT_IMAGE_KEY, run: async (ws: string, command: string, o: { timeoutS: number; gpu?: string; cpus?: number; pip: string[]; image?: string; system?: string[] }) => {
+    const r = await modalRun({ repo: ws, cmd: ["bash", "-lc", command], timeoutS: o.timeoutS, network: true, pip: o.pip, system: o.system ?? [], image: IMAGES[o.image ?? DEFAULT_IMAGE_KEY]!, ...(o.gpu ? { gpu: o.gpu } : {}), ...(o.cpus ? { cpus: o.cpus } : {}) }, g.budget);
     if (r.category === "provider_fatal") throw new SkillError("provider_fatal", r.stderr.slice(0, 300)); // out of GPU credit: stop, do not let the agent keep trying
     return { code: r.exitCode, stdout: r.stdout, stderr: r.stderr, category: r.category, costUsd: r.costUsd };
   } } };
@@ -609,7 +609,7 @@ const stage: Skill = {
     // Doubling counts the stage's own timeouts, not attempts (a run killed for a code switch is no timeout).
     const timeouts = (ctx.state.nodes.get(ctx.node.id)?.failures ?? []).filter((f) => f.category === "timeout").length;
     const timeoutS = Math.min(st.timeoutS * 2 ** timeouts, MAX_STAGE_S);
-    const runOn = (gpu: string | undefined) => modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(gpu ? { gpu } : {}) }, g.budget);
+    const runOn = (gpu: string | undefined) => modalRun({ repo: need(ctx).versionDir(version), cmd, timeoutS, network: !!st.network, ...(st.network ? { domains: DATA_DOMAINS } : {}), env, system: systemOf(ctx.state), ...(st.memGB ? { memoryMb: Math.round(st.memGB * 1024) } : {}), ...(st.cpus ? { cpus: st.cpus } : {}), ...(st.links?.length ? { links: st.links } : {}), pip: pipOf(ctx.state), image: IMAGES[imageOf(ctx.state)]!, restore, persist, ...(gpu ? { gpu } : {}) }, g.budget);
     // A GPU type out of capacity: the next cheapest type with enough memory, in the same attempt
     // (LoRA r3: L4 queued 20 min, then "Insufficient capacity").
     // Sticky within a run: once a stage of this run had to leave the planned type, later stages start

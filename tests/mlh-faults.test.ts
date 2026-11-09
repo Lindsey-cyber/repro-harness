@@ -358,13 +358,13 @@ describe("P1: declared system layers, host memory and data links reach the stage
     s.env = [{ name: "install", args: { system: ["apt-get update && apt-get install -y g++"] } }, ...s.env];
     const plan = structuredClone(s.plan[0]!.args) as Record<string, unknown> & { stages: Record<string, unknown>[] };
     plan.fetch = [{ url: URL, to: "/cache/data/canary/labels.txt" }];
-    plan.stages = [{ id: "train", argv: ["python3", "train.py", "--steps", "100", "--data", "data/labels.txt"], cwd: "/work", timeoutS: 300, gpu: "T4", memGB: 32, links: [{ path: "data/labels.txt", to: "/cache/data/canary/labels.txt" }] }];
+    plan.stages = [{ id: "train", argv: ["python3", "train.py", "--steps", "100", "--data", "data/labels.txt"], cwd: "/work", timeoutS: 300, gpu: "T4", memGB: 32, cpus: 8, links: [{ path: "data/labels.txt", to: "/cache/data/canary/labels.txt" }] }];
     s.plan = [{ name: "report", args: plan }];
     await run(ws, s);
     expect(claims(ws.runDir)).toEqual(CLEAN);
     const calls = readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const stage = calls.find((c) => (c.cmd as string[]).join(" ").endsWith("--data data/labels.txt"));
-    expect(stage).toMatchObject({ system: ["apt-get update && apt-get install -y g++"], memory_mb: 32768, links: [{ path: "data/labels.txt", to: "/cache/data/canary/labels.txt" }] });
+    expect(stage).toMatchObject({ system: ["apt-get update && apt-get install -y g++"], memory_mb: 32768, cpus: 8, links: [{ path: "data/labels.txt", to: "/cache/data/canary/labels.txt" }] });
     const smoke = calls.find((c) => (c.cmd as string[]).join(" ").includes("MLH_SMOKE_EXIT"));
     expect(smoke.system).toEqual(["apt-get update && apt-get install -y g++"]);
     expect(journal(ws.runDir).find((e) => e.t === "ok" && e.id === "repro.env").output.system).toEqual(["apt-get update && apt-get install -y g++"]);

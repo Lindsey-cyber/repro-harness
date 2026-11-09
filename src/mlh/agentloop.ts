@@ -47,7 +47,7 @@ export interface LoopOptions {
   // Remote execution (e.g. Modal): `run` uploads the working copy and runs there (optionally on a GPU);
   // `install` adds packages to the remote image instead of a local site.
   remote?: {
-    run(ws: string, command: string, o: { timeoutS: number; gpu?: string; pip: string[]; image?: string; system?: string[] }): Promise<{ code: number; stdout: string; stderr: string; category: string | null; costUsd: number }>;
+    run(ws: string, command: string, o: { timeoutS: number; gpu?: string; cpus?: number; pip: string[]; image?: string; system?: string[] }): Promise<{ code: number; stdout: string; stderr: string; category: string | null; costUsd: number }>;
     pip: string[]; // initial package list
     system?: string[]; // initial image build commands
     gpus: string[]; // GPU types the role may ask for
@@ -124,7 +124,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
     renameSync(statePath + ".tmp", statePath);
   };
   const remoteDefs: Partial<Record<ToolName, ToolDef>> = o.remote ? {
-    run: { type: "function", function: { name: "run", description: `Run a shell command in the repository root inside a remote sandbox (Linux, CUDA PyTorch 2.5.1 plus the packages installed so far). Omit gpu for CPU (cheap); gpu one of ${o.remote.gpus.join(", ")} costs money from the paper's budget. Your local edits are uploaded on every call; files the command writes are NOT kept, except under /cache (a persistent volume). Returns exit code and output tails.`, parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer" }, gpu: { type: "string" } }, required: ["command"] } } },
+    run: { type: "function", function: { name: "run", description: `Run a shell command in the repository root inside a remote sandbox (Linux, CUDA PyTorch 2.5.1 plus the packages installed so far). Omit gpu for CPU (cheap); gpu one of ${o.remote.gpus.join(", ")} costs money from the paper's budget. Your local edits are uploaded on every call; files the command writes are NOT kept, except under /cache (a persistent volume). cpus (1-32) adds CPU cores, e.g. when data loading is the bottleneck. Returns exit code and output tails.`, parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer" }, gpu: { type: "string" }, cpus: { type: "integer" } }, required: ["command"] } } },
     install: { type: "function", function: { name: "install", description: `Set the remote environment: optionally a base image (old repositories need old Python/PyTorch: ${Object.keys(o.remote.images ?? {}).join(", ")}; default ${o.remote.image ?? "py3.11-torch2.5-cu124"}) and pip requirement specifiers (e.g. 'transformers==4.30.2'). A specifier replaces any earlier one for the same package; '-name' removes a package. Later runs use the result; run something after changing it.`, parameters: { type: "object", properties: { packages: { type: "array", items: { type: "string" } }, image: { type: "string" }, system: { type: "array", items: { type: "string" }, description: "image build commands for system packages or toolchains, e.g. 'apt-get update && apt-get install -y g++' (replaces the earlier list)" } }, required: [] } } },
   } : {};
   const defs: Record<ToolName, ToolDef> = { ...DEFS, ...remoteDefs };
@@ -194,7 +194,7 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             if (o.remote) {
               const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;
               const asked = Number(args.timeout_s) || 600, cap = o.role.maxRunS ?? 3600;
-              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(asked, cap), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}), ...((state as { system?: string[] }).system?.length ? { system: (state as { system?: string[] }).system } : {}) });
+              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(asked, cap), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(Number.isInteger(args.cpus) && Number(args.cpus) >= 1 && Number(args.cpus) <= 32 ? { cpus: Number(args.cpus) } : {}), ...(state.image ? { image: state.image } : {}), ...((state as { system?: string[] }).system?.length ? { system: (state as { system?: string[] }).system } : {}) });
               // Say so when the limit cut the request (SimSiam r3: a planner asked 700 s, got 300, and lost the run's output).
               out = `exit ${r.category === "timeout" ? `timeout${asked > cap ? ` (you asked ${asked} s; commands are limited to ${cap} s: keep probes shorter and print as you go)` : ""}` : r.code}${r.costUsd ? ` (cost $${r.costUsd.toFixed(3)})` : ""}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.slice(-2500)}`;
               break;
