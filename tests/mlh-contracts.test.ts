@@ -146,3 +146,11 @@ describe("time limits", () => {
     expect(readFileSync(join(work, "transcript.jsonl"), "utf8")).toMatch(/"timing":\{"llmMs":\d+,"tools":\[\{"name":"run","ms":\d+\}\]\}/);
   });
 });
+
+describe("no escaping the command time limit", async () => {
+  const { backgrounds } = await import("../src/mlh/agentloop.ts");
+  it("refuses background processes, allows ordinary commands", () => {
+    for (const c of ["nohup python main.py > /cache/eval.log 2>&1 &", "python a.py &", "setsid python a.py", "(python a.py &) ; sleep 1", "tmux new -d python a.py"]) expect(backgrounds(c), c).toBe(true);
+    for (const c of ["cd /work && python main.py --eval 2>&1 | tail -5", "python a.py > log 2>&1", "ls && echo ok", "cmd >&2"]) expect(backgrounds(c), c).toBe(false);
+  });
+});

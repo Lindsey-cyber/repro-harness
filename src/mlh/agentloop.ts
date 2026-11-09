@@ -83,6 +83,8 @@ const DEFS: Record<Exclude<ToolName, never>, ToolDef> = {
 
 const safePath = (root: string, p: string) => { const a = resolve(root, p || "."); if (a !== root && !a.startsWith(root + "/")) throw new Error("path outside the repository"); return a; };
 
+export const backgrounds = (cmd: string) => /\b(nohup|setsid|disown)\b|&\s*($|;|\n|\))|\bscreen\s+-d|\btmux\b/.test(cmd.replace(/&&/g, "").replace(/2>&1|>&\d/g, ""));
+
 export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   mkdirSync(o.workDir, { recursive: true });
   const statePath = join(o.workDir, "state.json");
@@ -167,6 +169,9 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
           case "run": {
             // Every command of a remote agent runs remotely: one filesystem view (a split local/remote
             // view confused an env agent for 12 steps in P5; a container starts in ~2.4 s anyway).
+            // A per-command time limit cannot be escaped by backgrounding (P5: an env agent ran DETR's full
+            // evaluation with nohup and polled its log, 5 min at a time).
+            if (o.role.maxRunS && backgrounds(String(args.command))) { out = `refused: background processes (nohup, setsid, a trailing &) are not allowed; each command is limited to ${o.role.maxRunS} s and must finish within it`; break; }
             if (o.remote) {
               const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;
               const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(Number(args.timeout_s) || 600, o.role.maxRunS ?? 3600), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}) });
