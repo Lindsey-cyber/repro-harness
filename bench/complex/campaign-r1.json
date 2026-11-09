@@ -1,0 +1,26 @@
+[
+ {
+  "id": "simcse",
+  "arxiv": "2104.08821",
+  "repo": "https://github.com/princeton-nlp/SimCSE",
+  "commit": "102d450",
+  "objective": "Reproduce the average STS score of unsupervised SimCSE-BERT-base (Table 5) by evaluating the released checkpoint with this repository's evaluation script.",
+  "budgetUsd": 3
+ },
+ {
+  "id": "graphsaint",
+  "arxiv": "1907.04931",
+  "repo": "https://github.com/GraphSAINT/GraphSAINT",
+  "commit": "c9b1e34",
+  "objective": "Reproduce the test F1-micro of GraphSAINT on PPI and Flickr (Table 2) by training with this repository's configurations.",
+  "budgetUsd": 5
+ },
+ {
+  "id": "ft_transformer",
+  "arxiv": "2106.11959",
+  "repo": "https://github.com/yandex-research/rtdl-revisiting-models",
+  "commit": "e3ed46c",
+  "objective": "Reproduce the FT-Transformer results on California Housing (RMSE) and Adult (accuracy) from Table 3 with this repository's tuned configurations.",
+  "budgetUsd": 5
+ }
+]
