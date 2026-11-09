@@ -109,7 +109,19 @@ export function afterOk(s: RunState, id: string): TaskNode[] {
     // Runs are tagged by the patch count, so a command-only change does not collide with earlier runs.
     const k = s.order.filter((x) => x.startsWith(N.patch) && (s.nodes.get(x)!.output as PatchOut | undefined)?.accepted).length;
     if (!p.accepted) return [];
-    return gpuPlanOf(s) ? stageNodes(s, `.p${k}`) : runNodes(s, specsOf(s).map((x) => x.claim), `.p${k}`);
+    const gp = gpuPlanOf(s);
+    if (!gp) return runNodes(s, specsOf(s).map((x) => x.claim), `.p${k}`);
+    const all = stageNodes(s, `.p${k}`);
+    // Source, packages, image or site changed: everything is measured again. Only the failed stage's
+    // command changed (or nothing): only that stage, what it needs, and its claims are re-run.
+    // GraphSAINT r1: a one-stage command change (--num_cpu_core 4 -> 1) re-ran all 9 stages (~40 min).
+    const q = p as PatchOut & { pip?: unknown; image?: unknown; site?: unknown };
+    if (q.version !== undefined || q.pip || q.image || q.site) return all;
+    const target = String(n.params.claim).replace(/^stage-/, "");
+    const need = new Set<string>([target]);
+    for (let grew = true; grew;) { grew = false; for (const st of gp.stages) if (need.has(st.id)) for (const d of st.needs) if (!need.has(d)) { need.add(d); grew = true; } }
+    const claimsOfTarget = new Set(gp.claims.filter((c) => c.stage === target).map((c) => c.claim));
+    return all.filter((x) => (x.skill === "repro.stage" && need.has(String(x.params.stage))) || (x.skill === N.compare && claimsOfTarget.has(String(x.params.claim))) || x.skill === "repro.fetch");
   }
   return [];
 }

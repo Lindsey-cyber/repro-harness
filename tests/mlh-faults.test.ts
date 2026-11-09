@@ -260,3 +260,26 @@ describe("P1: ambiguous metric in a real run", () => {
     expect(journal(ws.runDir).some((e) => e.t === "fail" && /ambiguous metric/.test(e.message))).toBe(true);
   }, 60_000);
 });
+
+describe("P1: a one-stage command change re-runs only that stage", () => {
+  it("independent stages are not run again; the failed stage and what it needs are", async () => {
+    const ws = workspace([{ when: "--steps 100$", nth: [1], exit: 1, stderr: "Killed" }]);
+    const s = canaryScript();
+    const plan = structuredClone(s.plan[0]!.args) as { stages: Record<string, unknown>[] };
+    plan.stages = [
+      { id: "prep", argv: ["python3", "train.py", "--steps", "1"], cwd: "/work", timeoutS: 300 },
+      { id: "other", argv: ["python3", "train.py", "--steps", "50"], cwd: "/work", timeoutS: 300 },
+      { id: "train", argv: ["python3", "train.py", "--steps", "100"], cwd: "/work", timeoutS: 300, gpu: "T4", needs: ["prep"] },
+    ];
+    s.plan = [{ name: "report", args: plan }];
+    (s.plan[0]!.args as { claims: { stage: string }[] }).claims[0]!.stage = "train";
+    s.debug = [{ name: "report", args: { causes: [{ category: "run.resource_limit", evidence: "transient: the planned command succeeds when re-run" }], patch_intent: "re-run unchanged (transient kill)", run_argv: ["python3", "train.py", "--steps", "100"], expected_effect: "the stage succeeds" } }];
+    await run(ws, s);
+    const calls = readFileSync(join(ws.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => (JSON.parse(l).cmd as string[]).join(" "));
+    const prepRuns = calls.filter((c) => c === "python3 train.py --steps 1").length, otherRuns = calls.filter((c) => c === "python3 train.py --steps 50").length;
+    expect(claims(ws.runDir)).toEqual(CLEAN);
+    expect(journal(ws.runDir).some((e) => e.t === "ok" && String(e.id).startsWith("repro.patch") && e.output.accepted)).toBe(true);
+    expect(otherRuns).toBe(1); // an independent stage is not re-run
+    expect(prepRuns).toBe(2); // what the failed stage needs is re-run with it (its outputs are tagged per run)
+  }, 90_000);
+});
