@@ -102,3 +102,25 @@ Phases P0-P3 are offline ($0); P4 costs cents; P5-P6 are paid and need the owner
   failed-attempt cost exceeds 30 % of its spend stops.
 - No round without a doctor PASS from the last 24 h.
 - One paper at a time; no concurrency anywhere in the pipeline until P6 passes.
+
+## Handoff (2026-11-09, end of session)
+
+State:
+- Branch `mlh`, everything committed. Offline suite: 21 files, 153 tests passing. Mutation check:
+  17/17 reintroduced bugs caught. Live canary on real Modal: 5/5 pass (one killed and resumed).
+- P5 attempt 3 (DETR, sequential: 3 clean + 2 killed-and-resumed) was started at 04:33Z by
+  `scripts/mlh-reliability.sh` and left running unattended. It stops itself at the first run that
+  is stopped or has no definitive verdict, on a repeated infrastructure fault, waste > 30 %, or the
+  LLM cap. At handoff run 1 was in the env step (13 steps, $0.002 Modal), behaving normally.
+- Log: `bench/complex/results/reliability/p5c.log`; per run: `mlh campaign-status p5c-clean1`,
+  cost: `mlh cost p5c-clean1`.
+
+To stop it: `pkill -f mlh-reliability.sh; pkill -f -- "--label p5c"`.
+
+Next, in order: read p5c.log; if P5 passes (5/5 definitive, same verdict, resumes rerun no paid
+stage, waste <= 20 %), run the same protocol on SimCSE (P6); only then resume sequential rounds.
+If it stops, the reason is in the log and the run's stopped.json: fix, add a regression test,
+rerun P5 from scratch.
+
+Process lesson recorded: a long run must be reviewed every few minutes until it is known to be
+normal; P5 attempt 2 was caught at 5 minutes this way.
