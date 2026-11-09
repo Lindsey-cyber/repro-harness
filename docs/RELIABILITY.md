@@ -51,6 +51,20 @@ Accounting gaps found while writing this:
   shown by the ledger: $6.61).
 - There is no category for "productive but wasted" (replanning, discarded sessions).
 
+## 1.3 Evidence added by the validation phases (2026-11-09)
+
+| Phase | Status | Evidence |
+|---|---|---|
+| P0 accounting & attribution | done | `tests/mlh-accounting` (class table, cost buckets, per-attempt Modal spend under concurrency, ledger dedupe, killed-attempt LLM spend, stop rules); `mlh cost <round>`; c1 re-accounted in `bench/complex/results/c1.cost.md` (old runs' Modal spend shown as unattributed, not guessed) |
+| P1 mock end-to-end | done | `tests/mlh-e2e-repro`, `tests/mlh-faults` P1: 10 runs from scratch identical (claims, cost, one stage run); debugger diagnoses a failed command and the patch is authorized and re-run; data fetched with provenance; journal never has two nodes in flight |
+| P2 failure injection | done | `tests/mlh-faults` P2: capacity once / twice (stop, resume), spend limit, transport error, stage timeout, image build failure, GPU OOM, malformed model answer, kill after each of 5 nodes and inside the env agent, torn journal and budget, unapproved data host held, failed download named |
+| P3 scheduler & driver | done | `tests/mlh-chain` (6 chain cases, strictly sequential), `tests/mlh-campaign` (doctor gate, pinned clone, watchdog kill of a hung child and resume, result row, trust, retro, done marker). Found and fixed: a child that died before its journal was "resumed" (fails); the watchdog never killed a child hung before its first journal write |
+| Mutation check | done | 17 of 17 reintroduced bugs are caught by the suite (`bench/complex/results/reliability/mutations-2026-11-09.txt`) |
+| P4 live canary | **pass** | doctor PASS; canary reproduced exactly on real Modal (image, /cache, T4) in 4 of 4 runs, one killed after 4 nodes and resumed; about $0.001 per run |
+| P5 reliability baseline | running | DETR, 3 clean + 2 killed-and-resumed, sequential (`scripts/mlh-reliability.sh`, `bench/complex/results/reliability/`) |
+
+Offline suite: 21 files, 168 tests, all passing.
+
 ## 2. Failure taxonomy (to be enforced in code, P0)
 
 Every failed attempt gets exactly one class, recorded in the journal:
