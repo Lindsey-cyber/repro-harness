@@ -83,6 +83,36 @@ async function main(): Promise<void> {
       const flow = await import("./repro/flow.ts");
       const { readFileSync: rf, appendFileSync: af } = await import("node:fs");
       const dd = process.argv.indexOf("--");
+      if (process.argv[3] && process.argv[4] === "--file") {
+        // mlh operator-patch <runDir> --file <repo path>=<local file> [--file ...] <reason>: the owner's change of
+        // repository files (e.g. a config's dataloader workers), journaled as an accepted high-risk patch with a
+        // human basis and a new source version; every stage is measured on it.
+        const { replay: rp, apply: ap } = await import("./core/dag.ts");
+        const fl = await import("./repro/flow.ts");
+        const { readFileSync: rf, appendFileSync: af, mkdtempSync, mkdirSync: md, writeFileSync: wf } = await import("node:fs");
+        const { buildVersion } = await import("./repro/patch.ts");
+        const { tmpdir } = await import("node:os");
+        const { dirname } = await import("node:path");
+        const runDir = process.argv[3]!, args = process.argv.slice(4), files: [string, string][] = [];
+        while (args[0] === "--file") { const [p, l] = String(args[1]).split("="); if (!p || !l || p.startsWith("/") || p.split("/").includes("..")) throw new Error(`bad --file ${args[1]}`); files.push([p, l]); args.splice(0, 2); }
+        const why = args.join(" ");
+        if (!files.length || why.length < 10) throw new Error("usage: mlh operator-patch <runDir> --file <repo path>=<local file> <reason>");
+        const j = `${runDir}/journal.jsonl`;
+        const st = rp(rf(j, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)), 3);
+        const cur = fl.currentVersion(st).version, version = cur + 1;
+        const base = cur === 0 ? join(runDir, "source") : join(runDir, "versions", `v${cur}`), ws = mkdtempSync(join(tmpdir(), "mlh-owner-"));
+        for (const [p, l] of files) { if (!existsSync(join(base, p))) throw new Error(`${p} is not in the repository`); md(dirname(join(ws, p)), { recursive: true }); wf(join(ws, p), rf(l)); }
+        buildVersion(base, ws, files.map(([p]) => p), join(runDir, "versions", `v${version}`));
+        const at = new Date().toISOString(), ev: unknown[] = [], push = (e: never) => { ap(st, e); ev.push(e); };
+        const k = st.order.filter((x) => x.startsWith("repro.patch")).length + 1, pid = `repro.patch:owner-files:operator${k}`;
+        push({ t: "node", at, node: { id: pid, skill: "repro.patch", deps: [], purpose: "setup", params: { claim: "owner-files", from: cur, debug: "" } }, why: "operator" } as never);
+        push({ t: "start", at, id: pid, attempt: 1 } as never);
+        push({ t: "ok", at, id: pid, output: { accepted: true, risk: "high", reasons: [why], basis: `human approval: ${why}`, version, files: files.map(([p]) => p) }, findings: [], artifacts: [] } as never);
+        if (st.nodes.get("repro.plan")?.status === "succeeded") for (const node of fl.afterOk(st, pid)) if (!st.nodes.has(node.id)) push({ t: "node", at, node, why: `after ${pid}` } as never);
+        for (const e of ev) af(j, JSON.stringify(e) + "\n");
+        console.log(`version v${version}: ${files.map(([p]) => p).join(", ")}\n${(ev as { t: string; id?: string; node?: { id: string } }[]).map((e) => `${e.t} ${e.id ?? e.node?.id ?? ""}`).join("\n")}`);
+        break;
+      }
       if (dd < 0) throw new Error("usage: mlh operator-patch <runDir> <stage> <reason> -- <argv...>");
       const [runDir, stage, ...why] = process.argv.slice(3, dd), argv = process.argv.slice(dd + 1);
       const j = `${runDir}/journal.jsonl`;
