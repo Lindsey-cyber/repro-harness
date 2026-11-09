@@ -120,8 +120,11 @@ export function afterFail(s: RunState, id: string): TaskNode[] {
   if (n.skill === "repro.stage") {
     // A failed stage is debugged once per stage and source version (budget permitting, ≤ MAX_DEBUG_ROUNDS per stage).
     const stage = String(n.params.stage);
-    if (s.order.filter((x) => x.startsWith(`${N.debug}:stage-${stage}:`)).length >= MAX_DEBUG_ROUNDS) return [];
-    const did = `${N.debug}:stage-${stage}:v${currentVersion(s).version}`;
+    const rounds = s.order.filter((x) => x.startsWith(`${N.debug}:stage-${stage}:`) && s.nodes.get(x)!.status !== "skipped");
+    if (rounds.length >= MAX_DEBUG_ROUNDS) return [];
+    let did = `${N.debug}:stage-${stage}:v${currentVersion(s).version}`;
+    // A debug round skipped because its failure was the platform leaves the id taken: use the next one.
+    for (let k = 2; s.nodes.get(did)?.status === "skipped"; k++) did = `${N.debug}:stage-${stage}:v${currentVersion(s).version}.r${k}`;
     if (s.nodes.has(did)) return [];
     return [{ id: did, skill: N.debug, deps: [N.plan], purpose: "setup", params: { claim: `stage-${stage}`, stage, version: currentVersion(s).version, why: "failure", failedRun: id } }];
   }

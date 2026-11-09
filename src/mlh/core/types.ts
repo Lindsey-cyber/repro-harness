@@ -14,6 +14,8 @@ export type FailureCategory =
 
 // Only failures that a fresh attempt can plausibly fix are retried.
 export const RETRYABLE: readonly FailureCategory[] = ["sandbox_transient", "timeout", "provider_transient"];
+// Failures of the platform, not of the work: a resumed run gives such nodes a fresh attempt.
+export const INFRA_FAILURES: readonly FailureCategory[] = ["sandbox_transient", "provider_transient", "provider_fatal"];
 
 export interface Manifest {
   train?: string[];

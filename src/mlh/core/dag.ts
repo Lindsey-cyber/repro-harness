@@ -3,7 +3,7 @@
 // Nodes may only depend on nodes that already exist, so the graph is acyclic by
 // construction, and replanning is just appending nodes.
 import type { ArtifactRef, Confirmation, FailureCategory, Finding, FindingDraft } from "./types.ts";
-import { RETRYABLE } from "./types.ts";
+import { INFRA_FAILURES, RETRYABLE } from "./types.ts";
 
 export type Purpose = "setup" | "detect" | "confirm";
 export type NodeStatus = "pending" | "running" | "succeeded" | "failed" | "skipped" | "held";
@@ -27,6 +27,7 @@ export type RunEvent =
   | { t: "hold"; at: string; id: string; reason: string }
   | { t: "approve"; at: string; id: string; by: string }
   | { t: "skip"; at: string; id: string; reason: string }
+  | { t: "reopen"; at: string; id: string; reason: string }
   | { t: "gap"; at: string; skill: string; reason: string }
   | { t: "done"; at: string };
 
@@ -128,6 +129,12 @@ export function apply(s: RunState, e: RunEvent): RunState {
       if (ns.status === "held") ns.status = "pending";
       break;
     }
+    case "reopen": {
+      // A node that failed on the platform (outage, capacity, spend limit since raised) gets a fresh budget.
+      const ns = need(s, e.id);
+      ns.status = "pending"; ns.attempts = 0; ns.reason = e.reason;
+      break;
+    }
     case "skip":
       need(s, e.id).status = "skipped"; need(s, e.id).reason = e.reason;
       break;
@@ -171,6 +178,26 @@ export function ready(s: RunState): TaskNode[] {
 }
 
 // Pending nodes that can never run because a dependency ended without success.
+// On resume: nodes that failed only because of the platform (outage, capacity, a spend limit since
+// raised) run again; a debugger called for such a failure is skipped (nothing in the work to debug);
+// nodes skipped because such a dependency failed come back with it. Applies to s, returns the events.
+export function reopenPlatform(s: RunState, at: string): RunEvent[] {
+  const out: RunEvent[] = [];
+  const push = (e: RunEvent) => { apply(s, e); out.push(e); };
+  const lastInfra = (id: string | undefined) => { const f = id ? s.nodes.get(id)?.failures.at(-1) : undefined; return !!f && INFRA_FAILURES.includes(f.category); };
+  for (const id of s.order) {
+    const ns = s.nodes.get(id)!;
+    if (ns.status !== "failed" || !lastInfra(id)) continue;
+    if (ns.node.skill === "repro.debug" && lastInfra(ns.node.params.failedRun as string | undefined)) push({ t: "skip", at, id, reason: "called for a platform failure; the step itself is rerun" });
+    else push({ t: "reopen", at, id, reason: `last failure was the platform (${ns.failures.at(-1)!.category})` });
+  }
+  for (const id of s.order) {
+    const ns = s.nodes.get(id)!, m = ns.status === "skipped" ? /^dependency (\S+) (failed|skipped)$/.exec(ns.reason ?? "") : null;
+    if (m && s.nodes.get(m[1]!)?.status === "pending") push({ t: "reopen", at, id, reason: `dependency ${m[1]} reopened` });
+  }
+  return out;
+}
+
 export function blocked(s: RunState): { id: string; reason: string }[] {
   const out: { id: string; reason: string }[] = [];
   for (const id of s.order) {

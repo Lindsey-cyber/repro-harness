@@ -5,7 +5,7 @@
 import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { authorize, type Action, type Evidence } from "./core/authz.ts";
-import { apply, blocked, depOf, ready, replay, settled, type RunEvent, type RunState, type TaskNode } from "./core/dag.ts";
+import { apply, blocked, reopenPlatform, depOf, ready, replay, settled, type RunEvent, type RunState, type TaskNode } from "./core/dag.ts";
 import { AGENT, confirmations, expand, fallback, INSPECT, initialPlan } from "./core/planner.ts";
 import { compact, renderReport, summarize, type Summary } from "./core/report.ts";
 import { initialTrust, type SkillTrust } from "./core/trust.ts";
@@ -112,6 +112,7 @@ export async function runHarness(o: RunOptions): Promise<RunResult> {
   events = [];
 
   rmSync(join(runDir, "stopped.json"), { force: true }); // a (re)started run is no longer stopped
+  for (const e of reopenPlatform(state, now())) journal.append(e); // platform failures get a fresh attempt on resume
   const st = o.isolation ? { isolation: o.isolation, checks: [{ name: "forced by caller", ok: o.isolation === "namespace" }] } : await selfTest(join(runDir, "sbx"));
   const isolationEvidence: Evidence = { kind: "deterministic", check: `sandbox.selftest(${st.checks.map((c) => `${c.name}=${c.ok}`).join(",")})`, ok: st.isolation === "namespace" };
   const trust = loadTrust(o.trustFile);
