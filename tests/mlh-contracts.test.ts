@@ -127,3 +127,22 @@ describe("campaign watchdog", () => {
     expect(lastProgressMs(d)).toBeGreaterThan(j);
   });
 });
+
+describe("time limits", () => {
+  it("a run command is capped at the role's maxRunS; past wallMin the agent must report, and timings are logged", async () => {
+    const seen: number[] = [];
+    const src = tmp(), work = tmp(); writeFileSync(join(src, "train.py"), "");
+    let msgs: ChatMsg[] = [];
+    const slow: ChatModel = { model: "slow", usage: zeroUsage(), async chat(m: ChatMsg[]) { msgs = m; await new Promise((r) => setTimeout(r, 30)); return { message: { role: "assistant" as const, content: "", tool_calls: [{ id: "c", type: "function" as const, function: { name: "run", arguments: JSON.stringify({ command: "python train.py", timeout_s: 9999 }) } }] }, usage: zeroUsage() }; }, async json<T>() { return {} as T; } };
+    const r = await agentLoop({
+      role: { ...role, maxRunS: 300, wallMin: 0.0005 }, workDir: work, source: src, task: "t", isolation: "namespace", isolationEvidence: { kind: "deterministic", check: "x", ok: true }, model: slow,
+      remote: { pip: [], gpus: [], images: {}, image: "y", run: async (_ws, _c, o) => { seen.push(o.timeoutS); return { code: 0, stdout: "", stderr: "", category: null, costUsd: 0 }; } },
+    });
+    expect(seen[0]).toBe(300);
+    expect(r.stopped).toBe("budget");
+    expect(r.steps).toBeLessThan(10);
+    expect(String(msgs.at(-1)?.content)).toMatch(/Time budget .* exhausted/);
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync(join(work, "transcript.jsonl"), "utf8")).toMatch(/"timing":\{"llmMs":\d+,"tools":\[\{"name":"run","ms":\d+\}\]\}/);
+  });
+});

@@ -20,6 +20,9 @@ export interface Role {
   writeCode: boolean; // may write_file touch source code (.py etc.)
   report: { description: string; parameters: Record<string, unknown> };
   maxSteps: number;
+  // Time limits (c1: one planner spent 163 minutes running training to measure it).
+  maxRunS?: number; // longest single run command
+  wallMin?: number; // wall-clock budget for the whole loop, across resumes; then it must report
 }
 
 export interface LoopOptions {
@@ -130,10 +133,14 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
   let here = 0;
   // A run killed at its last step resumes with one step left, in which it must report.
   const limit = Math.max(o.role.maxSteps, resumedAt !== undefined ? state.step + 1 : 0);
+  const wallMs = () => (state as { wallMs?: number }).wallMs ?? 0;
+  let overTime = false;
   while (state.step < limit) {
-    const step = state.step + 1;
-    const msgs: ChatMsg[] = step === limit ? [...state.messages, { role: "user", content: "Step budget exhausted: call report now." }] : state.messages;
+    const step = state.step + 1, t0 = Date.now();
+    overTime = !!o.role.wallMin && wallMs() > o.role.wallMin * 60_000;
+    const msgs: ChatMsg[] = step === limit || overTime ? [...state.messages, { role: "user", content: overTime ? `Time budget (${o.role.wallMin} min) exhausted: call report now with what you have.` : "Step budget exhausted: call report now." }] : state.messages;
     const { message: msg } = await o.model.chat(msgs, { tools, maxTokens: 16000 });
+    const llmMs = Date.now() - t0, toolMs: { name: string; ms: number }[] = [];
     const next: ChatMsg[] = [...msgs, { role: "assistant", content: msg.content ?? "", ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}), ...(msg.reasoning_content ? { reasoning_content: msg.reasoning_content } : {}) }];
     appendFileSync(log, JSON.stringify({ step, content: msg.content, tool_calls: msg.tool_calls }) + "\n");
     if (!msg.tool_calls?.length) next.push({ role: "user", content: "Answer only through tool calls; finish by calling report." });
@@ -143,12 +150,13 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
       let badArgs = false;
       try { args = JSON.parse(call.function.arguments || "{}"); } catch { badArgs = true; }
       let out: string;
+      const tt = Date.now();
       try {
         // Malformed arguments are returned to the agent to resend, never read as an empty report.
         if (badArgs) throw new Error(`the arguments of ${call.function.name} are not valid JSON (${call.function.arguments.length} chars); resend them, keeping them shorter`);
         const name = call.function.name as ToolName | "report";
         const extra = o.extraTools?.find((t) => t.def.function.name === name);
-        if (extra) { out = await extra.run(args); next.push({ role: "tool", tool_call_id: call.id, content: out }); continue; }
+        if (extra) { out = await extra.run(args); toolMs.push({ name, ms: Date.now() - tt }); next.push({ role: "tool", tool_call_id: call.id, content: out }); continue; }
         if (name !== "report" && !o.role.tools.includes(name)) throw new Error(`tool ${name} is not available to the ${o.role.name} role`);
         switch (name) {
           case "report":
@@ -179,13 +187,13 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
             const local = o.remote && !args.gpu ? localInspection(String(args.command)) : undefined;
             if (o.remote && !local) {
               const gpu = typeof args.gpu === "string" && o.remote.gpus.includes(args.gpu) ? args.gpu : undefined;
-              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(Number(args.timeout_s) || 600, 3600), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}) });
+              const r = await o.remote.run(ws, String(args.command), { timeoutS: Math.min(Number(args.timeout_s) || 600, o.role.maxRunS ?? 3600), pip: state.pip ?? [], ...(gpu ? { gpu } : {}), ...(state.image ? { image: state.image } : {}) });
               out = `exit ${r.category === "timeout" ? "timeout" : r.code}${r.costUsd ? ` (cost $${r.costUsd.toFixed(3)})` : ""}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.slice(-2500)}`;
               break;
             }
             const d = authorize(o.isolation === "namespace" ? "exec_sandboxed" : "exec_unsandboxed", [o.isolationEvidence]);
             if (!d.allow) { out = `denied: ${d.reason}`; break; }
-            const r = await sandbox(Number(args.timeout_s) || undefined).run(["sh", "-c", local ?? String(args.command)]);
+            const r = await sandbox(Math.min(Number(args.timeout_s) || 600, o.role.maxRunS ?? 3600)).run(["sh", "-c", local ?? String(args.command)]);
             out = `exit ${r.category === "timeout" ? "timeout" : (/^MLH_EXIT=(\d+)$/m.exec(r.stderr)?.[1] ?? r.code)}\nstdout:\n${r.stdout.slice(-4000)}\nstderr:\n${r.stderr.replace(/^MLH_EXIT=\d+\n?/m, "").slice(-2500)}`;
             break;
           }
@@ -222,12 +230,16 @@ export async function agentLoop(o: LoopOptions): Promise<LoopResult> {
         if ((e instanceof SkillError && e.category === "provider_fatal") || /Insufficient Balance/.test(String(e))) throw e;
         out = `error: ${String(e instanceof SkillError ? e.message : (e as Error).message ?? e)}`;
       }
+      toolMs.push({ name: call.function.name, ms: Date.now() - tt });
       next.push({ role: "tool", tool_call_id: call.id, content: out });
     }
     state.messages = next;
     state.step = step;
+    (state as { wallMs?: number }).wallMs = wallMs() + (Date.now() - t0);
+    appendFileSync(log, JSON.stringify({ step, timing: { llmMs, tools: toolMs } }) + "\n"); // where the time went
     save();
     if (reported) return finish(reported, "report");
+    if (overTime) return finish(null, "budget");
     if (o.crashAfterSteps !== undefined && ++here >= o.crashAfterSteps) process.exit(137);
   }
   return finish(null, "budget");

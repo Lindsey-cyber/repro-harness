@@ -26,3 +26,4 @@ describe("read-only inspection runs locally, everything else remote", () => {
     "cat <<EOF",
   ])("remote: %s", (cmd) => expect(localInspection(cmd)).toBeUndefined());
 });
+
