@@ -1,0 +1,93 @@
+{
+ "claims": {
+  "level": "probation",
+  "n": 4,
+  "ok": 4,
+  "lower": 0.5100999795960008,
+  "history": [
+   {
+    "at": "2026-11-08T18:11:39.349Z",
+    "paper": "c1/detr",
+    "ok": true,
+    "why": "every extracted number is in the PDF"
+   },
+   {
+    "at": "2026-11-08T19:34:05.996Z",
+    "paper": "c1/simcse",
+    "ok": true,
+    "why": "every extracted number is in the PDF"
+   },
+   {
+    "at": "2026-11-08T20:09:46.428Z",
+    "paper": "c1/graphsaint",
+    "ok": true,
+    "why": "every extracted number is in the PDF"
+   },
+   {
+    "at": "2026-11-08T20:41:28.900Z",
+    "paper": "c1/ft_transformer",
+    "ok": true,
+    "why": "every extracted number is in the PDF"
+   }
+  ]
+ },
+ "env": {
+  "level": "probation",
+  "n": 3,
+  "ok": 3,
+  "lower": 0.4384939195509822,
+  "history": [
+   {
+    "at": "2026-11-08T18:11:39.349Z",
+    "paper": "c1/detr",
+    "ok": true,
+    "why": "smoke test passed on the agent's own report"
+   },
+   {
+    "at": "2026-11-08T19:34:05.996Z",
+    "paper": "c1/simcse",
+    "ok": true,
+    "why": "smoke test passed on the agent's own report"
+   },
+   {
+    "at": "2026-11-08T20:09:46.428Z",
+    "paper": "c1/graphsaint",
+    "ok": true,
+    "why": "smoke test passed on the agent's own report"
+   }
+  ]
+ },
+ "planner": {
+  "level": "probation",
+  "n": 3,
+  "ok": 1,
+  "lower": 0.061490315276160515,
+  "history": [
+   {
+    "at": "2026-11-08T18:11:39.349Z",
+    "paper": "c1/detr",
+    "ok": true,
+    "why": "plan accepted"
+   },
+   {
+    "at": "2026-11-08T19:34:05.996Z",
+    "paper": "c1/simcse",
+    "ok": false,
+    "why": "plan rejected by the validator"
+   },
+   {
+    "at": "2026-11-08T20:09:46.428Z",
+    "paper": "c1/graphsaint",
+    "ok": false,
+    "why": "plan rejected by the validator"
+   }
+  ]
+ },
+ "debugger": {
+  "level": "probation",
+  "n": 0,
+  "ok": 0,
+  "lower": 0,
+  "history": []
+ }
+}

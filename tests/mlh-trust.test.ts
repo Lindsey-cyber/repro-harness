@@ -32,8 +32,13 @@ describe("trust scores", () => {
   });
 
   it("does not credit or blame roles without new evidence", () => {
-    const o = roleOutcomes([ok("repro.env", { cached: true, smoke: { ok: true } }), fail("repro.plan", "provider_transient")] as never);
+    const o = roleOutcomes([ok("repro.env", { cached: true, smoke: { ok: true } }), fail("repro.plan", "provider_transient"), fail("repro.claims", "provider_fatal")] as never);
     expect(o).toEqual({ claims: null, env: null, planner: null, debugger: null });
+  });
+
+  it("infrastructure failures are not blamed on the agent", () => {
+    expect(roleOutcomes([fail("repro.env", "sandbox_transient")] as never).env).toBeNull();
+    expect(roleOutcomes([fail("repro.env", "contract_violation")] as never).env?.ok).toBe(false);
   });
 
   it("a debugger whose change fixes nothing fails", () => {

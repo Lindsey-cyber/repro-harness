@@ -25,12 +25,15 @@ export function wilsonLower(ok: number, n: number, z = 1.96): number {
   return (p + (z * z) / (2 * n) - z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
 }
 
+const INFRA = new Set(["sandbox_transient", "provider_transient", "provider_fatal"]);
+
 type Ev = RunEvent & { id?: string; output?: Record<string, unknown> };
 
 // Harness facts per role, read from a run's journal.
 export function roleOutcomes(events: Ev[]): Record<Role, Outcome> {
   const ok = (id: string) => events.find((e) => e.t === "ok" && e.id === id) as (Ev & { output: Record<string, unknown> }) | undefined;
-  const fails = (prefix: string) => events.filter((e) => e.t === "fail" && (e.id ?? "").startsWith(prefix)) as (Ev & { category: string; message: string })[];
+  // Infrastructure failures (provider, sandbox transport, spend limits) are evidence about the platform, not the agent.
+  const fails = (prefix: string) => (events.filter((e) => e.t === "fail" && (e.id ?? "").startsWith(prefix)) as (Ev & { category: string; message: string })[]).filter((f) => !INFRA.has(f.category));
   const out: Record<Role, Outcome> = { claims: null, env: null, planner: null, debugger: null };
 
   const c = ok("repro.claims");
@@ -44,7 +47,7 @@ export function roleOutcomes(events: Ev[]): Record<Role, Outcome> {
     const smoke = e.output.smoke as { ok?: boolean } | undefined;
     // A cached environment is not new evidence about the agent.
     if (e.output.cached !== true) out.env = !smoke?.ok ? { ok: false, why: "smoke test failed" } : e.output.repaired === true ? { ok: false, why: "smoke passed only after a repair round" } : { ok: true, why: "smoke test passed on the agent's own report" };
-  } else if (fails("repro.env").some((f) => f.category !== "provider_fatal" && f.category !== "provider_transient")) out.env = { ok: false, why: "environment step failed" };
+  } else if (fails("repro.env").length) out.env = { ok: false, why: "environment step failed" };
 
   const p = ok("repro.plan");
   if (p) out.planner = { ok: true, why: "plan accepted" };
