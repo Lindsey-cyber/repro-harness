@@ -70,3 +70,12 @@ describe("trust scores", () => {
     expect(m).toEqual({ success: 1, n: 4, medianMin: 30 });
   });
 });
+
+describe("container cost", () => {
+  it("bills CPU containers and adds CPU to GPU containers", async () => {
+    const { containerCost, cpuPrice, gpuPrice, Budget } = await import("../src/mlh/backends/modal.ts");
+    expect(containerCost(undefined, 3600)).toBeCloseTo(cpuPrice());
+    expect(containerCost("T4", 3600)).toBeCloseTo(cpuPrice() + gpuPrice("T4"));
+    expect(new Budget(5).worstCase({ timeoutS: 3300 } as never)).toBeCloseTo(cpuPrice());
+  });
+});

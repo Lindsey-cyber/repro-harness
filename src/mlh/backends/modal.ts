@@ -12,6 +12,10 @@ export const MODAL_SITE = join(import.meta.dirname, "../../../.mlh/tools/modal-s
 
 // USD per GPU-hour (Modal list prices as of 2026-11; override with MLH_GPU_PRICE_<GPU>).
 const PRICE: Record<string, number> = { T4: 0.59, L4: 0.8, A10G: 1.1, "A100-40GB": 2.1, "A100-80GB": 2.5, H100: 3.95 };
+// Every container also bills CPU and memory, GPU or not, and the clock includes the image build.
+// Conservative default: ~2 cores + 4 GiB at list price (~$0.13/h); override with MLH_CPU_PRICE.
+export const cpuPrice = () => Number(process.env.MLH_CPU_PRICE ?? 0.13);
+export const containerCost = (gpu: string | undefined, seconds: number) => ((cpuPrice() + (gpu ? gpuPrice(gpu) : 0)) * seconds) / 3600;
 export const gpuPrice = (gpu: string) => Number(process.env[`MLH_GPU_PRICE_${gpu.replace(/\W/g, "_")}`] ?? PRICE[gpu] ?? 4);
 
 export interface RemoteRun {
@@ -44,7 +48,7 @@ export class Budget {
     writeFileSync(`${this.file}.bak`, body);
   }
   // Container start-up and upload add a few minutes on top of the run's own timeout.
-  worstCase(r: RemoteRun): number { return r.gpu ? (gpuPrice(r.gpu) * (r.timeoutS + 300)) / 3600 : (0.05 * r.timeoutS) / 3600; }
+  worstCase(r: RemoteRun): number { return containerCost(r.gpu, r.timeoutS + 300); }
   // Concurrent runs: each admitted run reserves its worst case until it settles, so parallel stages
   // cannot together overshoot the limit.
   reserved = 0;
@@ -115,7 +119,7 @@ export async function gatewayRun(run: RemoteRun, budget: Budget, onStarted?: (id
     const r = await gw(`/result?id=${encodeURIComponent(id)}`);
     if (r.ok && r.done) {
       if (r.error) return { exitCode: -1, stdout: "", stderr: String(r.error), elapsedS: 0, costUsd: 0, files: {}, category: /Timeout/i.test(String(r.error)) ? "timeout" : "sandbox_transient" };
-      const elapsed = Number(r.elapsed_s), cost = run.gpu ? (gpuPrice(run.gpu) * elapsed) / 3600 : 0;
+      const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed);
       budget.charge(cost);
       const code = Number(r.exit_code), stderr = String(r.stderr);
       const category: FailureCategory | null = code === 0 ? null : code === 124 || code === -1 ? "timeout" : /CUDA out of memory|OutOfMemoryError/.test(stderr) ? "resource_limit" : "experiment_error";
@@ -151,9 +155,9 @@ async function modalRunAdmitted(run: RemoteRun, budget: Budget): Promise<RemoteR
     // What ran before the failure is charged.
     const ranS = Number(r.elapsed_s) || 0;
     if (run.gpu && ranS) budget.charge((gpuPrice(run.gpu) * ranS) / 3600);
-    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: run.gpu ? (gpuPrice(run.gpu) * ranS) / 3600 : 0, files: {}, category: /ResourceExhausted|spending limit|exceeded its spe|billing|insufficient (funds|credit)/i.test(head) ? "provider_fatal" : /ImageBuildError|Image build/.test(head) ? "experiment_error" : /\b(AuthError|Token (ID|secret)|Unauthenticated)\b/.test(head) ? "precondition" : /^(\w+\.)*(Timeout|SandboxTimeout|ExecTimeout)\w*Error|timed out|deadline exceeded/i.test(head) ? "timeout" : "sandbox_transient" };
+    return { exitCode: -1, stdout: "", stderr: e, elapsedS: ranS, costUsd: containerCost(run.gpu, ranS), files: {}, category: /ResourceExhausted|spending limit|exceeded its spe|billing|insufficient (funds|credit)/i.test(head) ? "provider_fatal" : /ImageBuildError|Image build/.test(head) ? "experiment_error" : /\b(AuthError|Token (ID|secret)|Unauthenticated)\b/.test(head) ? "precondition" : /^(\w+\.)*(Timeout|SandboxTimeout|ExecTimeout)\w*Error|timed out|deadline exceeded/i.test(head) ? "timeout" : "sandbox_transient" };
   }
-  const elapsed = Number(r.elapsed_s), cost = run.gpu ? (gpuPrice(run.gpu) * elapsed) / 3600 : 0;
+  const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed);
   budget.charge(cost);
   const code = Number(r.exit_code), stderr = String(r.stderr);
   const category: FailureCategory | null = code === 0 ? null : code === 124 || code === -1 ? "timeout" : /CUDA out of memory|OutOfMemoryError/.test(stderr) ? "resource_limit" : "experiment_error";

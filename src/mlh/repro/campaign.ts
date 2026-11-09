@@ -123,6 +123,17 @@ function render(rows: Record<string, unknown>[], extra: string[] = []): string {
   ].join("\n");
 }
 
+// Preflight: the LLM provider's balance, all currencies summed (CNY counted as is; the
+// threshold is in the same unit). Unknown (network error, other provider) never blocks.
+export async function llmBalance(): Promise<number | undefined> {
+  const key = process.env.DEEPSEEK_API_KEY, base = process.env.MLH_LLM_BASE_URL ?? "https://api.deepseek.com";
+  if (!key || !base.includes("deepseek")) return undefined;
+  try {
+    const j = (await (await fetch(`${base}/user/balance`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) })).json()) as { balance_infos?: { total_balance: string }[] };
+    return (j.balance_infos ?? []).reduce((a, b) => a + Number(b.total_balance), 0);
+  } catch { return undefined; }
+}
+
 export async function runCampaign(o: { config: string; label: string; parallel: number; out: string; mode?: "team" | "solo" }): Promise<void> {
   const papers = JSON.parse(readFileSync(o.config, "utf8")) as Paper[];
   const base = join(ROOT, ".mlh", "campaign", o.label);
@@ -140,6 +151,8 @@ export async function runCampaign(o: { config: string; label: string; parallel: 
   const gateNote = gate.blockedBy.length ? `scale gated: roles on probation (${gate.blockedBy.join(", ")}) -> at most ${gate.maxPapers} papers, ${gate.parallel} at a time` : "all roles trusted: full scale";
   await Promise.all(Array.from({ length: Math.min(o.parallel, gate.parallel, queue.length) }, async () => {
     for (let p = queue.shift(); p && !stop; p = queue.shift()) {
+      const bal = o.mode === "solo" ? undefined : await llmBalance(), min = Number(process.env.MLH_MIN_LLM_BALANCE ?? 3);
+      if (bal !== undefined && bal < min) { stop = true; appendFileSync(join(o.out, `${o.label}.preflight.log`), `${new Date().toISOString()} stopped before ${p.id}: LLM balance ${bal} < ${min}\n`); break; }
       const runDir = join(base, p.id), log = join(base, `${p.id}.log`);
       const t0 = Date.now();
       let resumes = 0;
