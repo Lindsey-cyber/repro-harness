@@ -30,6 +30,16 @@ export function classifyModalError(head: string): FailureCategory {
   return "sandbox_transient";
 }
 
+// A finished command's outcome. Pure. 137 is the kernel's OOM kill; a missing upstream output under
+// /cache/runs (its stage succeeded) is a volume not yet committed: transient. 97: a declared output missing.
+export function classifyExit(code: number, stderr: string): FailureCategory | null {
+  if (code === 0) return null;
+  if (code === 124 || code === -1) return "timeout";
+  if (code === 137 || /CUDA out of memory|OutOfMemoryError|MemoryError\b/.test(stderr)) return "resource_limit";
+  if (/cannot stat '\/cache\/runs\//.test(stderr)) return "sandbox_transient";
+  return "experiment_error";
+}
+
 export const gpuPrice = (gpu: string) => Number(process.env[`MLH_GPU_PRICE_${gpu.replace(/\W/g, "_")}`] ?? PRICE[gpu] ?? 4);
 
 export interface RemoteRun {
@@ -149,7 +159,7 @@ export async function gatewayRun(run: RemoteRun, budget: Budget, onStarted?: (id
       const elapsed = Number(r.elapsed_s), cost = containerCost(run.gpu, elapsed);
       budget.charge(cost);
       const code = Number(r.exit_code), stderr = String(r.stderr);
-      const category: FailureCategory | null = code === 0 ? null : code === 124 || code === -1 ? "timeout" : /CUDA out of memory|OutOfMemoryError/.test(stderr) ? "resource_limit" : "experiment_error";
+      const category = classifyExit(code, stderr);
       return { exitCode: code, stdout: String(r.stdout), stderr, elapsedS: elapsed, costUsd: cost, files: (r.files ?? {}) as Record<string, string>, category };
     }
     if (Date.now() > deadline) { await gw(`/cancel?id=${encodeURIComponent(id)}`, { method: "POST" }); return { exitCode: -1, stdout: "", stderr: "job exceeded its deadline and was cancelled", elapsedS: run.timeoutS, costUsd: 0, files: {}, category: "timeout" }; }

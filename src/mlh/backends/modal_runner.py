@@ -87,10 +87,14 @@ def op_run(req):
             q, d = shlex.quote(src), shlex.quote(dst)
             return f"rm -rf {d} && mkdir -p $(dirname {d}) && cp -a {q} {d}"
         pre = " && ".join(put(r["from"], "/work/" + r["to"]) for r in (req.get("restore") or [])) or "true"
-        post = " ; ".join(put("/work/" + p["from"], p["to"]) for p in (req.get("persist") or [])) or "true"
+        # A declared output that the command did not produce is reported, never skipped silently.
+        def keep(src, dst):
+            q = shlex.quote(src)
+            return f"if [ -e {q} ]; then {put(src, dst)}; else echo MLH_MISSING_OUTPUT={q} >&2; m=1; fi"
+        post = " ; ".join(keep("/work/" + p["from"], p["to"]) for p in (req.get("persist") or [])) or "true"
         env = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in (req.get("env") or {}).items())
         cmd = " ".join(shlex.quote(a) for a in req["cmd"])
-        script = f"cd /work && ({pre}) && {('env ' + env + ' ') if env else ''}{cmd}; s=$?; ({post}) >/dev/null 2>&1; sync; exit $s"
+        script = f"cd /work && ({pre}) && {('env ' + env + ' ') if env else ''}{cmd}; s=$?; m=0; {post}; sync; [ $s -eq 0 ] && [ $m -ne 0 ] && s=97; exit $s"
         p = sb.exec("bash", "-c", script, timeout=int(req["timeout_s"]))
         out, err = p.stdout.read(), p.stderr.read()
         code = p.wait()
@@ -102,7 +106,13 @@ def op_run(req):
                 pass
         return {"exit_code": code, "stdout": out[-100000:], "stderr": err[-50000:], "elapsed_s": time.time() - t0, "files": files}
     finally:
+        # Volume changes become visible to other containers only once termination has committed them:
+        # wait for it, or the next stage can start on a stale view (GraphSAINT r1, missing build outputs).
         sb.terminate()
+        try:
+            sb.wait(raise_on_termination=False)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
