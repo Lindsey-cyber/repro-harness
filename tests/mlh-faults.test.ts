@@ -286,3 +286,45 @@ describe("P1: a one-stage command change re-runs only that stage", () => {
     expect(prepRuns).toBe(2); // what the failed stage needs is re-run with it (its outputs are tagged per run)
   }, 90_000);
 });
+
+describe("P1: environment data is declared, downloaded by the harness, and travels with the cache", () => {
+  const URL = "https://huggingface.co/datasets/canary/resolve/main/labels.txt";
+  const BODY = "0 1 0 1 0 1 0 1 0 1";
+  const withEnvData = () => {
+    const s = canaryScript();
+    s.env = [
+      { name: "fetch_data", args: { items: [{ url: URL, to: "/cache/data/canary/labels.txt" }] } },
+      { name: "report", args: { runnable: true, launch: { cwd: ".", example_command: ["python3", "train.py", "--steps", "1", "--data", "/cache/data/canary/labels.txt"] }, problems: [] } },
+    ];
+    return s;
+  };
+  it("a cache hit in a fresh run re-downloads the declared data and the smoke test passes without the env agent", async () => {
+    const first = workspace();
+    first.env.MLH_FAKE_DATA = JSON.stringify({ [URL]: BODY });
+    const log1: string[] = [];
+    await withEnv(first.env, () => runHarness({ runDir: first.runDir, mode: "repro", llm: scriptedTeam(withEnvData(), log1), concurrency: 1, source: CANARY_REPO, objective: "Reproduce the canary accuracy.", arxiv: "2101.00001", gpuBudgetUsd: 1 }));
+    const env1 = journal(first.runDir).find((e) => e.t === "ok" && e.id === "repro.env");
+    expect(env1.output.data).toEqual([{ url: URL, to: "/cache/data/canary/labels.txt" }]);
+    expect(env1.output.smoke.ok).toBe(true);
+    // A new run: its own empty volume, the same env cache.
+    const second = workspace();
+    const env = { ...second.env, MLH_ENV_CACHE: first.env.MLH_ENV_CACHE!, MLH_FAKE_DATA: JSON.stringify({ [URL]: BODY }) };
+    const log2: string[] = [];
+    await withEnv(env, () => runHarness({ runDir: second.runDir, mode: "repro", llm: scriptedTeam(withEnvData(), log2), concurrency: 1, source: CANARY_REPO, objective: "Reproduce the canary accuracy.", arxiv: "2101.00001", gpuBudgetUsd: 1 }));
+    const env2 = journal(second.runDir).find((e) => e.t === "ok" && e.id === "repro.env");
+    expect(env2.output.cached).toBe(true);
+    expect(log2.filter((l) => l.startsWith("env:"))).toEqual([]); // the env agent did not run
+    const calls = readFileSync(join(second.env.MLH_FAKE_CACHE!, ".fake-calls.jsonl"), "utf8").trim().split("\n").map((l) => (JSON.parse(l).cmd as string[]).join(" "));
+    expect(calls.some((c) => c.includes("fetch_data.py") && c.includes(URL))).toBe(true); // re-downloaded into the new volume
+  }, 120_000);
+  it("an unknown host is refused by the tool, nothing is downloaded", async () => {
+    const ws = workspace();
+    const s = withEnvData();
+    s.env[0] = { name: "fetch_data", args: { items: [{ url: "https://data.example.org/x.txt", to: "/cache/data/x.txt" }] } };
+    s.env[1] = { name: "report", args: { runnable: true, launch: { cwd: ".", example_command: ["python3", "train.py", "--steps", "1"] }, problems: [] } };
+    await run(ws, s);
+    const st = JSON.parse(readFileSync(join(ws.runDir, "work", "repro.env", "state.json"), "utf8"));
+    expect(JSON.stringify(st.messages)).toMatch(/REFUSED: data\.example\.org is not a known data host/);
+    expect(journal(ws.runDir).find((e) => e.t === "ok" && e.id === "repro.env").output.data).toEqual([]);
+  }, 60_000);
+});

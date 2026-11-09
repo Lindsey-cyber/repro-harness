@@ -36,7 +36,7 @@ import { parseDiff, riskOf } from "./patchrisk.ts";
 import { CLAIMS_PROMPT, DEBUG_ROLE, ENV_ROLE, PLAN_ROLE } from "./roles.ts";
 import type { SiteManager } from "./site.ts";
 import { Budget, cpuPrice, gpuPrice, modalRun } from "../backends/modal.ts";
-import { DATA_DOMAINS, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, imageForPins, validateGpuPlan, type Stage } from "./gpu.ts";
+import { checkFetchItems, DATA_DOMAINS, DEFAULT_IMAGE_KEY, GPUS, IMAGES, gpuPlanOf, imageForPins, type FetchItem, validateGpuPlan, type Stage } from "./gpu.ts";
 import { GPU_PLAN_ROLE } from "./roles.ts";
 
 export interface ReproCtx {
@@ -214,11 +214,27 @@ const env: Skill = {
     // Off unless configured: with per-run /cache volumes a cached environment may rely on files the new run lacks.
     const cacheFile = need(ctx).gpu && process.env.MLH_ENV_CACHE ? join(resolve(process.env.MLH_ENV_CACHE), `${treeHash(need(ctx).versionDir(0))}.json`) : undefined;
     if (cacheFile && existsSync(cacheFile)) {
-      const hit = JSON.parse(readFileSync(cacheFile, "utf8")) as Record<string, unknown> & { pip: string[]; image: string; launch: unknown };
+      const hit = JSON.parse(readFileSync(cacheFile, "utf8")) as Record<string, unknown> & { pip: string[]; image: string; launch: unknown; data?: FetchItem[] };
+      // The environment's declared data, downloaded again into this run's own volume, then the smoke test.
+      if (hit.data?.length) await harnessFetch(ctx, hit.data);
+
       const sm = await smoke(ctx, hit.launch as never, hit.pip, undefined, hit.image);
       if (sm.ok) return { output: { ...hit, cached: true, smoke: { ok: true, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) } } };
     }
-    const base = { ...loopBase(ctx), ...remoteFor(ctx, []), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}${pinHint}` };
+    // Data the agent declares is downloaded by the harness (provenance) and recorded with the environment.
+    const dataFile = join(ctx.workDir(), "env-data.json");
+    const data: FetchItem[] = existsSync(dataFile) ? JSON.parse(readFileSync(dataFile, "utf8")) : [];
+    const fetchTool = { def: { type: "function" as const, function: { name: "fetch_data", description: "Download datasets or checkpoints into /cache/data with provenance (sha256 recorded). items: [{url, to: '/cache/data/<name>', unpack?: 'tar'|'zip', sha256?}]. Known data hosts only.", parameters: { type: "object", properties: { items: { type: "array", items: { type: "object" } } }, required: ["items"] } } },
+      run: async (args: Record<string, unknown>) => {
+        const c = checkFetchItems(Array.isArray(args.items) ? args.items : []);
+        if (c.errors.length) return `REFUSED: ${c.errors.join("; ")}`;
+        if (c.unknownHosts.length) return `REFUSED: ${c.unknownHosts.join(", ")} is not a known data host; find the dataset on a known host or report it as a problem`;
+        const r = await harnessFetch(ctx, c.items);
+        for (const it of c.items) if (!data.some((d) => d.url === it.url && d.to === it.to)) data.push(it);
+        writeFileSync(dataFile, JSON.stringify(data));
+        return `fetched: ${JSON.stringify(r)}`;
+      } };
+    const base = { ...loopBase(ctx), ...remoteFor(ctx, []), extraTools: [fetchTool], workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective of the team: ${ctx.state.objective}\nMake this repository's experiments runnable.${remote}${pinHint}` };
     let r = await agentLoop({ ...base, role: ENV_ROLE });
     // Complex repositories need more than one step budget: an agent that stopped at its limit with the
     // experiment still not runnable continues from its checkpoint (two more rounds at most).
@@ -236,7 +252,7 @@ const env: Skill = {
       const fix = await agentLoop({ ...base, role: { ...ENV_ROLE, maxSteps: r.steps + ENV_ROLE.maxSteps }, continueWith: `The harness started your launch command (${sm.command}) for ${SMOKE_S} s and it failed: ${sm.why}.\nOutput tail:\n${sm.tail}\nFix the environment (not the code) and report again with a launch command that starts.` });
       if (fix.report) { r = fix; sm = await smoke(ctx, r.report!.launch as never, r.pip, r.site, r.image); }
     }
-    const output = { ...r.report, runnable: sm.ok, agentSaidRunnable: claimed, repaired, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps };
+    const output = { ...r.report, data, runnable: sm.ok, agentSaidRunnable: claimed, repaired, smoke: { ok: sm.ok, why: sm.why, command: sm.command, tail: sm.tail.slice(-1200) }, ...(r.site ? { site: r.site, specs: need(ctx).sites.specsOf(r.site) } : {}), pip: r.pip, image: r.image ?? DEFAULT_IMAGE_KEY, steps: r.steps };
     if (cacheFile && sm.ok) { mkdirSync(resolve(process.env.MLH_ENV_CACHE!), { recursive: true }); writeFileSync(cacheFile, JSON.stringify(output)); }
     return { output };
   },
@@ -258,7 +274,7 @@ const plan: Skill = {
       const checkPlan = { def: { type: "function" as const, function: { name: "check_plan", description: "Validate a draft plan with the harness's own rules (stage structure, scripts exist, GPU allowlist, declared data, worst-case budget). Takes the same object you would report. Returns OK or the list of problems. Use it before report.", parameters: GPU_PLAN_ROLE.report.parameters } },
         run: async (draft: Record<string, unknown>) => { let v = validateGpuPlan(cs, draft, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) }); if (v.plan) { const bad = await probeUrls(v.plan.fetch.map((f) => f.url)); if (bad.length) v = { errors: bad }; } return v.plan ? `OK: the plan passes (worst case $${v.plan.worstCaseUsd.toFixed(2)}). Now call report with it.` : `REJECTED:\n- ${v.errors.join("\n- ")}`; } };
       for (let attempt = 0; attempt < 3; attempt++) {
-        const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), extraTools: [checkPlan], paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip })}`,
+        const r = await agentLoop({ ...loopBase(ctx), ...remoteFor(ctx, pipOf(ctx.state), imageOf(ctx.state)), extraTools: [checkPlan], paper: paperText(ctx), workDir: ctx.workDir(), source: need(ctx).versionDir(0), task: `Objective: ${ctx.state.objective}\nBudget left for this paper: $${g.budget.remaining().toFixed(2)}.\nClaims (fractions where percentages):\n${JSON.stringify(cs, null, 1)}\n\nEnvironment engineer's report:\n${JSON.stringify({ runnable: e.runnable, launch: e.launch, problems: e.problems, notes: e.notes, pip: e.pip, data: e.data })}\nData the environment declared (already downloaded into /cache/data with provenance; declare the same items in your plan's fetch, they are not downloaded twice): ${JSON.stringify(e.data ?? [])}`,
           // A rejected plan is fixed in the same conversation (what it learned is kept), not re-explored from scratch.
           role: { ...GPU_PLAN_ROLE, maxSteps: GPU_PLAN_ROLE.maxSteps + attempt * 10 }, ...(feedback ? { continueWith: feedback.trim() } : {}) });
         let v = validateGpuPlan(cs, r.report, { budgetUsd: g.budget.remaining(), price: (gpu: string) => gpuPrice(gpu) + cpuPrice(), cpu: cpuPrice(), exists: (p) => existsSync(join(src0, p)) });
@@ -493,6 +509,18 @@ const stage: Skill = {
     return { output: { stage: sid, seed, values, ...(Object.keys(disambiguated).length ? { disambiguated } : {}), version, elapsedS: Math.round(r.elapsedS), costUsd: Number(r.costUsd.toFixed(4)), spentUsd: Number(g.budget.spent.toFixed(4)) } };
   },
 };
+
+// Download declared items into this run's /cache/data with fetch_data.py (idempotent, sha256 recorded).
+async function harnessFetch(ctx: SkillCtx, items: FetchItem[]): Promise<unknown[]> {
+  const g = need(ctx).gpu;
+  if (!g || !items.length) return [];
+  const dir = join(ctx.workDir(), "env-fetcher");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "fetch_data.py"), readFileSync(join(import.meta.dirname, "../backends/fetch_data.py")));
+  const r = await modalRun({ repo: dir, cmd: ["python3", "fetch_data.py", JSON.stringify({ items, checks: [] })], timeoutS: 3600, network: true }, g.budget);
+  if (r.category) throw new SkillError(r.category === "experiment_error" ? "experiment_error" : r.category, `fetch failed: ${r.stderr.slice(-800)}`);
+  return (JSON.parse(r.stdout.trim().split("\n").pop() ?? "{}") as { items?: unknown[] }).items ?? [];
+}
 
 // Data acquisition by harness code: the declared fetch items, then the completeness checks.
 const fetchData: Skill = {

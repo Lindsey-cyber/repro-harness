@@ -49,6 +49,23 @@ export function imageForPins(text: string): { key: string; torch: string } | und
   return key ? { key, torch: want } : undefined;
 }
 
+// The rules for one declared download, shared by the planner's plan and the env agent's fetch_data
+// tool: https (or http with a sha256), into /cache/data/, a known data host. Pure.
+export function checkFetchItems(raw: unknown[]): { items: FetchItem[]; errors: string[]; unknownHosts: string[] } {
+  const items: FetchItem[] = [], errors: string[] = [];
+  for (const f of raw as Partial<FetchItem>[]) {
+    let u: URL;
+    try { u = new URL(String(f?.url)); } catch { errors.push(`fetch url ${f?.url} is not a URL`); continue; }
+    const sha = typeof f.sha256 === "string" && /^[0-9a-f]{64}$/i.test(f.sha256) ? f.sha256 : undefined;
+    if (u.protocol !== "https:" && !(u.protocol === "http:" && sha)) { errors.push(`fetch url ${f.url} must be https, or http with its sha256`); continue; }
+    const to = String(f.to ?? "");
+    if (!to.startsWith("/cache/data/") || to.includes("..") || to.replace(/\/$/, "") === "/cache/data") { errors.push(`fetch target ${to} must be a path under /cache/data/`); continue; }
+    items.push({ url: String(f.url), to, ...(sha ? { sha256: sha } : {}), ...(f.unpack === "zip" || f.unpack === "tar" ? { unpack: f.unpack } : {}) });
+  }
+  const unknownHosts = [...new Set(items.map((f) => new URL(f.url).hostname).filter((h) => !DATA_HOSTS.some((d) => h === d || h.endsWith(`.${d}`))))];
+  return { items, errors, unknownHosts };
+}
+
 export const DEFAULT_IMAGE_KEY = "py3.11-torch2.5-cu124";
 export interface FetchItem { url: string; to: string; sha256?: string; unpack?: "zip" | "tar" }
 export const MAX_STAGE_S = 6 * 3600;
