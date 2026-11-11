@@ -1,32 +1,10 @@
 # Verifiable harness for ML experiment reproduction and debugging
 
-Status: milestones 1–2 are in place on branch `mlh`; §6 holds the M2 results on blind benchmarks, which supersede §4's same-author numbers as evidence. Code lives in `src/mlh/`, the benchmark in `bench/ml/`, and the results in `bench/ml/results/`. Commands: `npm run mlh -- run <repo|https://github.com/…> --objective "…"` and `npm run mlh -- bench`.
+Status: milestones 1–2 are in place; §6 holds the M2 results on blind benchmarks, which supersede §4's same-author numbers as evidence. Code lives in `src/mlh/`, the benchmark in `bench/ml/`, and the results in `bench/ml/results/`. Commands: `npm run mlh -- run <repo|https://github.com/…> --objective "…"` and `npm run mlh -- bench`.
 
-## 1. Gap analysis of the existing repository
+## 1. Origin
 
-The harness was built inside an earlier TypeScript agent project. It already holds several mechanisms the target system needs. Most of them are written as **organization rules** (docs/program/ORG.md) rather than as runtime code.
-
-| Existing component | Where | Reused as | Kept as is? |
-|---|---|---|---|
-| Coordinator, manager and worker hierarchy, with a verifier on a different model | `docs/program/ORG.md`, coordinator-guard hook, worktrees | The build process for this harness. It is not a runtime agent topology: M1 needed no extra runtime agents (see §3) | yes |
-| Pure decision code kept apart from IO, enforced by a structure test | `tests/structure.test.ts` | The same pattern. `src/mlh/core` is pure and `tests/mlh-structure.test.ts` enforces it | pattern reused |
-| Gate whose holds no approval can lift; "approved" lifts only trust checks | `src/gate/gate.ts` | `core/authz.ts`: risk classes, holds, deny lists. A human approval lifts holds; nothing lifts a denial | redesigned for actions |
-| Ledger with a legal-transition table and an append-only JSONL file; never retry `unconfirmed` | `src/store/ledger.ts` | `core/dag.ts` + `io/journal.ts`: an event-sourced task state machine with fsync, tolerant of a torn last line | generalized |
-| Per-stage trust, where only a human promotes | `src/discover/stagetrust.ts` | `core/trust.ts`: per-skill trust that drops after one bad audit and rises only after a 5-audit clean streak plus a human | generalized |
-| Eval set and regression check (`scoreEval`, `regressions`) | `src/discover/evalset.ts` | `bench.ts` scoring + `--check baseline.json` | pattern reused |
-| A model verdict counts only for the exact text it judged (`basis` hash) | `src/discover/modeltriage.ts` | Principle: model output is advisory and tied to its evidence. In authz, LLM evidence never authorizes | principle |
-| Review list instead of blocking (`jh pending`) | `src/store/review.ts` | Held nodes go to `summary.json.held` and `mlh approve`. The run never waits for input | pattern reused |
-
-Gaps against the target, and how M1 handles each:
-
-| Target area | What existed | Gap | M1 |
-|---|---|---|---|
-| 1 Stateful orchestration | A linear CLI pipeline. Parallelism was organizational (worktrees) | No task DAG, retries, checkpoints or resume | **Done:** DAG, parallel scheduler, retry by failure category, journal checkpoint, crash resume |
-| 2 Sandboxed execution | Playwright against employer pages. No code execution | Everything | **Done:** user+net+mount namespaces, rlimits, timeout, fresh copy per execution, an isolation self-test that the authz layer uses as evidence |
-| 3 Skill runtime | Claude Code skills (markdown) for humans and agents | No runtime contracts or versioning | **Done:** 11 versioned skills with declared needs, actions, dependencies and a zod output contract that the orchestrator enforces |
-| 4 Trust and verification | Cross-model review of code, gate, stage trust | No verification of runtime claims | **Done:** every suspicion is checked independently (a designated confirmer or a fresh replication). Risk-based authz, human approval gate, asymmetric trust. *Not yet:* an LLM cross-check (interface only, §5) |
-| 5 Context and artifacts | Run directories, evidence files | No content addressing, compaction or resume context | **Done:** sha256 artifact store, run.json metadata, `context.txt` (bounded compaction), resumable runs. *Not yet:* cross-run structured memory |
-| 6 Evaluation and observability | Eval set, scorecards | No traces or task benchmark | **Done:** per-attempt trace (latency, sandbox time, failure category, token and cost fields), a 12-task benchmark, 3 modes, fault injection, crash-recovery measurement |
+The harness was built inside an earlier agent project of mine and reuses several of its patterns, generalized for experiment reproduction: an append-only ledger with a legal-transition table became the event-sourced task DAG and journal (`core/dag.ts`, `io/journal.ts`); a gate whose holds only a human can lift became risk-based authorization (`core/authz.ts`); per-stage trust that only a human promotes became per-skill trust (`core/trust.ts`); an eval set with a regression check became the benchmark scoring (`bench.ts`); and a review list that never blocks became held nodes released by `mlh approve`. Pure decision code is kept apart from IO, and `tests/mlh-structure.test.ts` enforces it.
 
 ## 2. Architecture
 

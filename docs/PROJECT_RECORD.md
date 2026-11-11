@@ -1,9 +1,6 @@
-# Verifiable Multi-Agent Harness for Autonomous ML Reproduction — project record
+# Project record
 
-Source material for a CV / PhD-application entry. Every number below was measured in this
-project (journals, traces and test runs are in the repository, branch `mlh`). Claims that are
-**not** yet established are marked as such in section 9; keep them out of the CV or phrase them
-as ongoing.
+A detailed record of what was built, what was measured, and what went wrong along the way. Every number below was measured in this project; the journals, traces and test runs are in this repository. Claims that are not yet established are listed in section 8.
 
 ## 1. One-paragraph summary
 
@@ -245,31 +242,7 @@ Each item: what happened → structural fix → test.
 - **Short review cycles on live runs**: a 5-minute status cadence caught several problems within
   minutes (e.g. an agent looking for its repository for 12 steps; 28 useless planned stages).
 
-## 8. Draft CV bullets (to be polished)
-
-- Built a stateful multi-agent harness (claim extraction, environment, planning, debugging agents)
-  that autonomously reproduces ML papers from PDF + code on cloud GPUs; event-sourced journal with
-  crash-safe resume, dependency-aware staged plans, sandboxed execution, per-paper budgets.
-- Reproduced 5 published papers end to end across 5 domains (DETR AP 42.0; SimCSE 76.25 STS;
-  GraphSAINT 8/8 F1 within tolerance; FT-Transformer RMSE 0.457 / acc 0.857 over 5 seeds; LoRA
-  RoBERTa-base MRPC 89.0 / RTE 85.2 vs 89.7 / 86.6 over 5 seeds), all within tolerance of the
-  published numbers at ≈$0.3–3.3 GPU per paper.
-- Diagnosed a silent bug in a paper's official code (LoRA: a library interaction cancelled the
-  MNLI initialisation, costing RTE 4 points) by evaluating the authors' released checkpoint
-  (chance level before the fix, 87.4 after), and verified a one-line fix before re-running.
-- Made the system stop itself when evidence says a run is not worth it: measured SimSiam's full
-  protocol at ~8.5 GPU hours with a repository whose own reported number is below the paper's,
-  and stopped it rather than spend.
-- Designed independent verification and risk-adaptive authorisation: claims must appear in the
-  paper, results are re-measured by the harness with value-blind metric extraction, code changes
-  are risk-graded (evaluation/metric edits need human approval), and per-role agent trust is
-  earned from audited outcomes (Wilson lower bound) before the system scales.
-- Built an evaluation and reliability framework: failure injection across the full pipeline,
-  regression tests from every real incident (199 tests, 17/17 mutation catch rate), live canary,
-  per-attempt cost/waste accounting and strict stop rules; single-agent and deterministic
-  baselines (equal accuracy on 10 real tasks; 3/3 vs 0/3 completion under injected faults).
-
-## 9. Not yet established (do not claim as done)
+## 8. Not yet established
 
 - Repeatability of a complex paper over several identical runs (the planned 5-run baseline was
   stopped in favour of covering more papers).
@@ -281,15 +254,3 @@ Each item: what happened → structural fix → test.
   The RTE result is at the edge of the tolerance (gap 1.40 points vs 2 × the paper's 0.7 std).
 - GraphSAINT PPI-edge's verdict was measured but not recorded by the system's comparison step;
   DETR's system verdict was recorded before the extraction fix (the correct value is in the log).
-
-## 10. Aggregate numbers and what could still be added
-
-- **Attempted 6, reproduced 5** (DETR, SimCSE, GraphSAINT, FT-Transformer, LoRA); SimSiam stopped
-  on measured cost. Claims reproduced: 1 + 1 + 8 + 2 + 2 = 14 of 14 attempted.
-- **Coverage of work types**: eval of released checkpoints (DETR, SimCSE), multi-configuration
-  training (GraphSAINT), multi-seed training (FT-Transformer), fine-tuning from a released adapter
-  with a repository bug fixed (LoRA).
-- **Possible sixth paper**: one whose claim can be verified within about an hour on one GPU
-  (released checkpoint or short training), chosen after a feasibility check.
-- Optionally: single-agent baseline on the same complex papers; repeated runs of one paper
-  (variance of the verdict and of cost); first agent roles promoted under the trust standard.
